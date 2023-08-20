@@ -203,23 +203,38 @@ do_real_connect:
 __attribute__((constructor)) static void _init(void) {
 	char *datafile_name = getenv("URELAY_TPROXY_FILE");
 	if (datafile_name) {
-		int datafile_fd = open(datafile_name, O_RDONLY|O_NOCTTY);
+		int datafile_fd = open(datafile_name, O_RDONLY|O_NOCTTY|O_CLOEXEC);
 		if (datafile_fd < 0) {
 			fprintf(stderr, "tproxy-preload: Failed to open %s: %s\n", datafile_name, strerror(errno));
 			abort();
+			return;
 		}
 		struct stat st = {0};
 		if (fstat(datafile_fd, &st)) {
 			abort();
+			return;
+		}
+		if (st.st_size < sizeof(my_local_header)) {
+			fprintf(stderr, "tproxy-preload: File empty or less than minimum size\n");
+			abort();
+			return;
 		}
 		void *datafile_mmap = mmap(NULL, st.st_size, PROT_READ, MAP_SHARED, datafile_fd, 0);
 		if (datafile_mmap == MAP_FAILED) {
 			fprintf(stderr, "tproxy-preload: Failed to mmap %s: %s\n", datafile_name, strerror(errno));
+			abort();
+			return;
 		}
+		close(datafile_fd);
 		actual_data_header = datafile_mmap;
 		actual_data_header_len = st.st_size;
 		if (actual_data_header_len < sizeof(my_local_header)) abort();
 		memcpy(&my_local_header, actual_data_header, sizeof(my_local_header));
+		if (my_local_header.magic != htonl(0xf200a01fU)) {
+			fprintf(stderr, "tproxy-preload: bad magic number in %s\n", datafile_name);
+			abort();
+			return;
+		}
 		my_local_header.nr_subnet_entries = ntohs(my_local_header.nr_subnet_entries);
 		if (actual_data_header_len < (offsetof(struct data_header, entries) + (my_local_header.nr_subnet_entries * sizeof(struct data_entry)))) abort();
 	}
