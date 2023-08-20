@@ -17,5 +17,5 @@ fe8f:0:100::/40 '/run/u-relay/48-#//4_.sock' 2
 fe8f::3:0:0/96 '/run/socketbox2/#//6_/#//7__#//P_' 1
 # ignore localhost for NAT64
 ::ffff:127.0.0.0/104 '' 0
-# Kasper Dupont's public NAT64 service
+# Kasper Dupont's public NAT64 service https://nat64.net
 ::ffff:0:0/96 2a00:1098:2b::1:0:0 3
