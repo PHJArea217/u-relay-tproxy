@@ -218,7 +218,7 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
 						/* Otherwise we need to create an IPv6 socket and replace the original socket */
 						new_s = socket(AF_INET6, SOCK_CLOEXEC|SOCK_STREAM|((fflags_orig & O_NONBLOCK) ? SOCK_NONBLOCK : 0), IPPROTO_TCP);
 						if (new_s < 0) goto fail_news;
-						int rv = real_connect(fd, (struct sockaddr *) &the_sockaddr, sizeof(the_sockaddr));
+						int rv = real_connect(new_s, (struct sockaddr *) &the_sockaddr, sizeof(the_sockaddr));
 						if (rv == 0) {
 							break;
 						} else if ((rv == -1) && (errno == EINPROGRESS)) {

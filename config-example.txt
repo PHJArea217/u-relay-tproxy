@@ -1,4 +1,16 @@
+# type 0 = don't do anything special
+# type 1 = redirect to Unix domain socket, no PROXY protocol v2 header
+# type 2 = redirect to Unix domain socket, with PROXY protocol v2 header of the original destination IP/port
+# type 3 = IP translation. The network bits are replaced with the network bits of the new IP address, and the host bits remain unchanged.
+# assign otherwise unusable IPv6 range to Universal Relay
 fe8f:0:1::/48 '/run/u-relay/64-#//3_.sock' 2
+# larger range for Universal Relay
 fe8f:0:100::/40 '/run/u-relay/48-#//4_.sock' 2
+# for testing IPv6 Things
 2602:806:a003:40e::/64 '/run/u-relay/ipv6_things.sock' 2
+# matches socketbox-preload SKBOX_ENABLE_CONNECT behavior
 fe8f::3:0:0/96 '/run/socketbox2/#//6_/#//7__#//P_' 1
+# ignore localhost for NAT64
+::ffff:127.0.0.0/104 '' 0
+# Kasper Dupont's public NAT64 service
+::ffff:0:0/96 2a00:1098:2b::1:0:0 3
