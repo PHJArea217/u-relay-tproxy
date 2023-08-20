@@ -207,7 +207,7 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
 				switch (domain) {
 					case AF_INET:
 						/* If we're translating to ::ffff:0:0 we can just connect to the corresponding IPv4 */
-						if (IN6_IS_ADDR_V4MAPPED(the_sockaddr.sin6_addr)) {
+						if (IN6_IS_ADDR_V4MAPPED(&the_sockaddr.sin6_addr)) {
 							struct sockaddr_in ipv4;
 							ipv4.sin_family = AF_INET;
 							ipv4.sin_port = the_sockaddr.sin6_port;
@@ -227,7 +227,7 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
 						}
 						goto fail_news;
 						break;
-					case AF_INET6;
+					case AF_INET6:
 						/* We can connect with either IPv4 or IPv6. */
 						errno = saved_errno;
 						return real_connect(fd, (struct sockaddr *) &the_sockaddr, sizeof(the_sockaddr));
