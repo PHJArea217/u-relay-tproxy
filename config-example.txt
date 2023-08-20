@@ -7,6 +7,19 @@
 # LD_PRELOAD=/path/to/liburelay-tproxy.so URELAY_TPROXY_FILE=/path/to/config_out
 
 # entries are evaluated sequentially
+# For types 1 and 2, #//n_ where n is from 0 to 7 inclusive, is substituted by the n'th 16-bit group of the IPv6 address (leftmost is 0), in %05hu format. #//P_ is the TCP port, also in %05hu format.
+# For example, [2001:db8:1000:0:666:ffff:abcd:1234]:8080:
+# #//0_ = 08193
+# #//1_ = 03512
+# #//2_ = 04096
+# #//3_ = 00000
+# #//4_ = 01638
+# #//5_ = 65535
+# #//6_ = 43981
+# #//7_ = 04660
+# #//P_ = 08080
+# All IP ranges in this file must be IPv6. IPv4 connections will be processed as if they were IPv4-mapped IPv6 addresses in the ::ffff:0:0/96 range.
+
 # assign otherwise unusable IPv6 range to Universal Relay
 fe8f:0:1::/48 '/run/u-relay/64-#//3_.sock' 2
 # larger range for Universal Relay
