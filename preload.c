@@ -67,6 +67,7 @@ static int get_tproxy_socket(const struct data_header *header, const struct data
 	uint32_t a[4];
 	memcpy(a, &sockaddr->sin6_addr, 16);
 	int found_i = -1;
+	int matched_mask = 128;
 	for (uint32_t i = 0; i < header_safe->nr_subnet_entries; i++) {
 		const struct data_entry *entry = &header->entries[i];
 		unsigned int mask = entry->subnet_mask;
@@ -82,6 +83,7 @@ static int get_tproxy_socket(const struct data_header *header, const struct data
 			}
 		}
 		found_i = i;
+		matched_mask = mask;
 		goto found;
 not_found:
 		;
@@ -93,18 +95,21 @@ found:
 	entry.offset = ntohl(entry.offset);
 	entry.length = ntohs(entry.length);
 	int send_proxy_protocol = 1;
+	const char *data_start_offset = (const char *) &header->entries[header_safe->nr_subnet_entries];
+	uint64_t data_offset = data_start_offset - ((char *) header);
+	uint64_t data_start = data_offset + entry.offset;
+	uint64_t data_end = data_start + entry.length;
+	if (data_end > (uint64_t) header_total_size) {
+		return -1;
+	}
 	switch (entry.type) {
+		case 0:
+			return -2;
+			break;
 		case 1:
 			send_proxy_protocol = 0;
 			/* fallthrough */
 		case 2:
-			const char *data_start_offset = (const char *) &header->entries[header_safe->nr_subnet_entries];
-			uint64_t data_offset = data_start_offset - ((char *) header);
-			uint64_t data_start = data_offset + entry.offset;
-			uint64_t data_end = data_start + entry.length;
-			if (data_end > (uint64_t) header_total_size) {
-				return -1;
-			}
 			struct sockaddr_un resultant = {AF_UNIX, {0}};
 			uint32_t length = entry.length;
 			if (length > (sizeof(resultant.sun_path) - 1)) length = sizeof(resultant.sun_path) - 1;
@@ -129,7 +134,7 @@ found:
 			if (subst_val) int16tonum(ntohs(sockaddr->sin6_port), subst_val);
 			int s = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0);
 			if (s<0) return -1;
-			if (connect(s, (struct sockaddr *) &resultant, offsetof(struct sockaddr_un, sun_path) + length)) {
+			if (real_connect(s, (struct sockaddr *) &resultant, offsetof(struct sockaddr_un, sun_path) + length)) {
 				close(s);
 				return -1;
 			}
@@ -148,6 +153,20 @@ found:
 			}
 			return s;
 			break;
+		case 3:
+			if (entry.length < sizeof(struct in6_addr)) return -1;
+			struct in6_addr new_addr;
+			memcpy(&new_addr, &data_start_offset[entry.offset], sizeof(struct in6_addr));
+			uint32_t m[4];
+			memcpy(m, subnet_mask_data[matched_mask], 16);
+			new_addr.s6_addr32[0] = (m[0] & new_addr.s6_addr32[0]) | ((~m[0]) & sockaddr->sin6_addr.s6_addr32[0]);
+			new_addr.s6_addr32[1] = (m[1] & new_addr.s6_addr32[1]) | ((~m[1]) & sockaddr->sin6_addr.s6_addr32[1]);
+			new_addr.s6_addr32[2] = (m[2] & new_addr.s6_addr32[2]) | ((~m[2]) & sockaddr->sin6_addr.s6_addr32[2]);
+			new_addr.s6_addr32[3] = (m[3] & new_addr.s6_addr32[3]) | ((~m[3]) & sockaddr->sin6_addr.s6_addr32[3]);
+			memcpy(&sockaddr->sin6_addr, &new_addr, sizeof(struct in6_addr));
+			return -3;
+			break;
+
 	}
 	return -1;
 }
@@ -179,6 +198,44 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
 			if (new_s == -2) {
 				goto do_real_connect;
 			}
+			int connect_einprogress = 0;
+			if (new_s == -3) { /* Translation mode. the_sockaddr has been updated to the new translated IPv6 address. */
+				domain_size = sizeof(int);
+				if (getsockopt(fd, SOL_SOCKET, SO_DOMAIN, &domain, &domain_size)) {
+					goto fail_news;
+				}
+				switch (domain) {
+					case AF_INET:
+						/* If we're translating to ::ffff:0:0 we can just connect to the corresponding IPv4 */
+						if (IN6_IS_ADDR_V4MAPPED(the_sockaddr.sin6_addr)) {
+							struct sockaddr_in ipv4;
+							ipv4.sin_family = AF_INET;
+							ipv4.sin_port = the_sockaddr.sin6_port;
+							ipv4.sin_addr.s_addr = the_sockaddr.sin6_addr.s6_addr32[3];
+							errno = saved_errno;
+							return real_connect(fd, (struct sockaddr *) &ipv4, sizeof(ipv4));
+						}
+						/* Otherwise we need to create an IPv6 socket and replace the original socket */
+						new_s = socket(AF_INET6, SOCK_CLOEXEC|SOCK_STREAM|((fflags_orig & O_NONBLOCK) ? SOCK_NONBLOCK : 0), IPPROTO_TCP);
+						if (new_s < 0) goto fail_news;
+						int rv = real_connect(fd, (struct sockaddr *) &the_sockaddr, sizeof(the_sockaddr));
+						if (rv == 0) {
+							break;
+						} else if ((rv == -1) && (errno == EINPROGRESS)) {
+							connect_einprogress = 1;
+							break;
+						}
+						goto fail_news;
+						break;
+					case AF_INET6;
+						/* We can connect with either IPv4 or IPv6. */
+						errno = saved_errno;
+						return real_connect(fd, (struct sockaddr *) &the_sockaddr, sizeof(the_sockaddr));
+						break;
+					default:
+						goto do_real_connect;
+				}
+			}
 			int nonblocking = !!(fflags_orig & O_NONBLOCK);
 			if (ioctl(new_s, FIONBIO, &nonblocking)) {
 				goto fail_news;
@@ -187,6 +244,10 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
 				goto fail_news;
 			}
 			close(new_s);
+			if (connect_einprogress) {
+				errno = EINPROGRESS;
+				return -1;
+			}
 			errno = saved_errno;
 			return 0;
 fail_news:

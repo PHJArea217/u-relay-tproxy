@@ -5,10 +5,17 @@ def gen_file(maps):
     data_entries = []
     for ip, path, the_type in maps:
         entry = ip.network_address.packed + bytes([ip.prefixlen, the_type])
+        if the_type == 3:
+            path = ipaddress.IPv6Network((path, ip.prefixlen)).network_address
         if path not in path_map:
-            new_offset = len(path_data)
-            new_data = bytes(path, encoding="utf-8") + b'\0'
-            new_length = len(new_data)
+            if the_type == 3:
+                new_offset = len(path_data)
+                new_data = path.packed
+                new_length = len(new_data)
+            else:
+                new_offset = len(path_data)
+                new_data = bytes(path, encoding="utf-8") + b'\0'
+                new_length = len(new_data)
             path_data = path_data + new_data
             path_map[path] = (new_offset, new_length)
         else:
