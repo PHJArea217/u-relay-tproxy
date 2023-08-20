@@ -1,7 +1,12 @@
 # type 0 = don't do anything special
 # type 1 = redirect to Unix domain socket, no PROXY protocol v2 header
 # type 2 = redirect to Unix domain socket, with PROXY protocol v2 header of the original destination IP/port
-# type 3 = IP translation. The network bits are replaced with the network bits of the new IP address, and the host bits remain unchanged.
+# type 3 = IP translation. The network bits are replaced with the network bits of the new IP address, and the host bits remain unchanged. Can be used for IPv4->IPv6, IPv6->IPv4.
+# "Compile" this file using the gen-config.py script.
+# python3 gen-config.py config-example.txt config_out
+# LD_PRELOAD=/path/to/liburelay-tproxy.so URELAY_TPROXY_FILE=/path/to/config_out
+
+# entries are evaluated sequentially
 # assign otherwise unusable IPv6 range to Universal Relay
 fe8f:0:1::/48 '/run/u-relay/64-#//3_.sock' 2
 # larger range for Universal Relay
