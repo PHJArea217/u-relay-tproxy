@@ -1,0 +1,4 @@
+fe8f:0:1::/48 '/run/u-relay/64-#//3_.sock' 2
+fe8f:0:100::/40 '/run/u-relay/48-#//4_.sock' 2
+2602:806:a003:40e::/64 '/run/u-relay/ipv6_things.sock' 2
+fe8f::3:0:0/96 '/run/socketbox2/#//6_/#//7__#//P_' 1
