@@ -48,6 +48,12 @@ struct pp2_header {
 		char other[216];
 	} data;
 };
+struct type3_data {
+	uint8_t ipv6_addr[16];
+	uint8_t bindtodevice[16];
+	uint8_t bind_addr[16];
+	uint32_t flags;
+};
 static void int16tonum(uint16_t n, char *num) {
 	num[4] = '0' + (n % 10);
 	n /= 10;
@@ -81,7 +87,17 @@ int shutdown(int s, int which) {
 real_shutdown:
 	return real_shutdown_func(s, which);
 }
-static int get_tproxy_socket(const struct data_header *header, const struct data_header *header_safe, size_t header_total_size, struct sockaddr_in6 *sockaddr) {
+static int apply_t3_data(int fd, struct type3_data *data, int sock_domain) {
+	uint32_t dev_len = strnlen(data->bindtodevice, 16);
+	if (dev_len) {
+		char b2d_safe[17] = {0};
+		memcpy(b2d_safe, data->bindtodevice, dev_len);
+		if (setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, b2d_safe, dev_len+1)) return -1;
+	}
+	return 0;
+}
+
+static int get_tproxy_socket(const struct data_header *header, const struct data_header *header_safe, size_t header_total_size, struct sockaddr_in6 *sockaddr, struct type3_data *t3_data) {
 	uint32_t a[4];
 	memcpy(a, &sockaddr->sin6_addr, 16);
 	int found_i = -1;
@@ -182,6 +198,11 @@ found:
 			new_addr.s6_addr32[2] = (m[2] & new_addr.s6_addr32[2]) | ((~m[2]) & sockaddr->sin6_addr.s6_addr32[2]);
 			new_addr.s6_addr32[3] = (m[3] & new_addr.s6_addr32[3]) | ((~m[3]) & sockaddr->sin6_addr.s6_addr32[3]);
 			memcpy(&sockaddr->sin6_addr, &new_addr, sizeof(struct in6_addr));
+			if (t3_data) {
+				uint32_t length = entry.length;
+				if (length > sizeof(struct type3_data)) length = sizeof(struct type3_data);
+				memcpy(t3_data, &data_start_offset[entry.offset], length);
+			}
 			return -3;
 			break;
 
@@ -208,11 +229,12 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
 	}
 	if (the_sockaddr.sin6_family == AF_INET6) {
 		if (actual_data_header_len) {
+			struct type3_data t3_data = {0};
 			int fflags_orig = fcntl(fd, F_GETFL, 0);
 			if (fflags_orig < 0) goto do_real_connect;
 			int fdflags_orig = fcntl(fd, F_GETFD, 0);
 			if (fdflags_orig < 0) goto do_real_connect;
-			int new_s = get_tproxy_socket(actual_data_header, &my_local_header, actual_data_header_len, &the_sockaddr);
+			int new_s = get_tproxy_socket(actual_data_header, &my_local_header, actual_data_header_len, &the_sockaddr, &t3_data);
 			if (new_s == -2) {
 				goto do_real_connect;
 			}
@@ -230,12 +252,14 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
 							ipv4.sin_family = AF_INET;
 							ipv4.sin_port = the_sockaddr.sin6_port;
 							ipv4.sin_addr.s_addr = the_sockaddr.sin6_addr.s6_addr32[3];
+							if (apply_t3_data(fd, &t3_data, AF_INET)) goto fail_news;
 							errno = saved_errno;
 							return real_connect(fd, (struct sockaddr *) &ipv4, sizeof(ipv4));
 						}
 						/* Otherwise we need to create an IPv6 socket and replace the original socket */
 						new_s = socket(AF_INET6, SOCK_CLOEXEC|SOCK_STREAM|((fflags_orig & O_NONBLOCK) ? SOCK_NONBLOCK : 0), IPPROTO_TCP);
 						if (new_s < 0) goto fail_news;
+						if (apply_t3_data(new_s, &t3_data, AF_INET6)) goto fail_news;
 						int rv = real_connect(new_s, (struct sockaddr *) &the_sockaddr, sizeof(the_sockaddr));
 						if (rv == 0) {
 							break;
@@ -247,6 +271,7 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
 						break;
 					case AF_INET6:
 						/* We can connect with either IPv4 or IPv6. */
+						if (apply_t3_data(fd, &t3_data, AF_INET6)) goto fail_news;
 						errno = saved_errno;
 						return real_connect(fd, (struct sockaddr *) &the_sockaddr, sizeof(the_sockaddr));
 						break;

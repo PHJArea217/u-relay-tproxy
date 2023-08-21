@@ -1,4 +1,4 @@
-import shlex, sys, ipaddress, struct
+import shlex, sys, ipaddress, struct, os
 def gen_file(maps):
     path_map = {}
     path_data = b''
@@ -6,11 +6,17 @@ def gen_file(maps):
     for ip, path, the_type in maps:
         entry = ip.network_address.packed + bytes([ip.prefixlen, the_type])
         if the_type == 3:
-            path = ipaddress.IPv6Network((path, ip.prefixlen)).network_address
+            path_parts = str(path).split(',')
+            path_ip = (ipaddress.IPv6Network((path_parts[0], ip.prefixlen))).network_address
+            path_b2d = bytes(path_parts[1] if len(path_parts) >= 2 else '', encoding="utf-8")[0:16]
+            if len(path_b2d) < 16:
+                path_b2d = path_b2d + (b'\0' * (16 - len(path_b2d)))
+            path_extra = b'\0' * 20
+            path = (1, path_ip.packed + path_b2d + path_extra)
         if path not in path_map:
             if the_type == 3:
                 new_offset = len(path_data)
-                new_data = path.packed
+                new_data = path[1]
                 new_length = len(new_data)
             else:
                 new_offset = len(path_data)
@@ -36,6 +42,7 @@ with open(sys.argv[1], 'r') as source_file:
         line_split = shlex.split(line, comments=True)
         if len(line_split) >= 2:
             lines.append((ipaddress.IPv6Network(line_split[0]),line_split[1],int(line_split[2] if len(line_split) >= 3 else "2")))
-    with open(sys.argv[2], 'wb') as dest_file:
+    with open(sys.argv[2] + '.tmp', 'wb') as dest_file:
         dest_file.write(gen_file(lines))
+    os.rename(sys.argv[2] + '.tmp', sys.argv[2])
 

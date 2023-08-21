@@ -28,6 +28,8 @@ fe8f:0:100::/40 '/run/u-relay/48-#//4_.sock' 2
 2602:806:a003:40e::/64 '/run/u-relay/ipv6_things.sock' 2
 # matches socketbox-preload SKBOX_ENABLE_CONNECT behavior
 fe8f::3:0:0/96 '/run/socketbox2/#//6_/#//7__#//P_' 1
+# link local assignment
+fe8f:0:2:1::/64 fe80::,wlp3s0 3
 # ignore localhost for NAT64
 ::ffff:127.0.0.0/104 '' 0
 # NAT64 CLAT on well-known prefix
