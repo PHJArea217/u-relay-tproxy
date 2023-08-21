@@ -60,9 +60,27 @@ static void int16tonum(uint16_t n, char *num) {
 	num[0] = '0' + (n % 10);
 }
 static int (*real_connect)(int, const struct sockaddr *, socklen_t) = NULL;
+static int (*real_shutdown_func)(int, int);
 static struct data_header my_local_header;
 static struct data_header *actual_data_header = NULL;
 static size_t actual_data_header_len = 0;
+static uint64_t local_flags = 0;
+#define LOCAL_FLAG_SHUTDOWN_HACK 0x10000
+__attribute__((visibility("default")))
+int shutdown(int s, int which) {
+	if (local_flags & LOCAL_FLAG_SHUTDOWN_HACK) {
+		if (which == SHUT_RD) {
+			int d = 0;
+			int dlen = sizeof(int);
+			if (getsockopt(s, SOL_SOCKET, SO_DOMAIN, &d, &dlen)) goto real_shutdown;
+			if (d == AF_UNIX) {
+				which = SHUT_RDWR;
+			}
+		}
+	}
+real_shutdown:
+	return real_shutdown_func(s, which);
+}
 static int get_tproxy_socket(const struct data_header *header, const struct data_header *header_safe, size_t header_total_size, struct sockaddr_in6 *sockaddr) {
 	uint32_t a[4];
 	memcpy(a, &sockaddr->sin6_addr, 16);
@@ -240,7 +258,7 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
 			if (ioctl(new_s, FIONBIO, &nonblocking)) {
 				goto fail_news;
 			}
-			if (dup3(new_s, fd, (fdflags_orig & FD_CLOEXEC) ? O_NONBLOCK : 0) != fd) {
+			if (dup3(new_s, fd, (fdflags_orig & FD_CLOEXEC) ? O_CLOEXEC : 0) != fd) {
 				goto fail_news;
 			}
 			close(new_s);
@@ -302,5 +320,12 @@ __attribute__((constructor)) static void _init(void) {
 	void *connect_symbol = dlsym(RTLD_NEXT, "connect");
 	if (connect_symbol == NULL) abort();
 	real_connect = connect_symbol;
+	void *shutdown_symbol = dlsym(RTLD_NEXT, "shutdown");
+	if (!shutdown_symbol) {
+		abort();
+	}
+	real_shutdown_func = shutdown_symbol;
+	char *local_flags_s = getenv("URELAY_TPROXY_LOCAL_FLAGS");
+	if (local_flags_s) local_flags = strtoull(local_flags_s, NULL, 0);
 }
 
