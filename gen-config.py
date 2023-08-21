@@ -20,7 +20,9 @@ def gen_file(maps):
                 new_length = len(new_data)
             else:
                 new_offset = len(path_data)
-                new_data = bytes(path, encoding="utf-8") + b'\0'
+                new_data = bytes(path, encoding="utf-8")
+                new_data_pad_length = ((len(new_data) + 7) >> 3) << 3
+                new_data = new_data + (b'\0' * (new_data_pad_length - len(new_data)))
                 new_length = len(new_data)
             path_data = path_data + new_data
             path_map[path] = (new_offset, new_length)
