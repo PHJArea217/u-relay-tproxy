@@ -11,7 +11,7 @@ def gen_file(maps):
             path_b2d = bytes(path_parts[1] if len(path_parts) >= 2 else '', encoding="utf-8")[0:16]
             if len(path_b2d) < 16:
                 path_b2d = path_b2d + (b'\0' * (16 - len(path_b2d)))
-            path_extra = b'\0' * 20
+            path_extra = b'\0' * 24
             path = (1, path_ip.packed + path_b2d + path_extra)
         if path not in path_map:
             if the_type == 3:
