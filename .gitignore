@@ -1,1 +1,2 @@
 /liburelay-tproxy.so
+*.o

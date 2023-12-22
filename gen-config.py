@@ -3,27 +3,31 @@ def gen_file(maps):
     path_map = {}
     path_data = b''
     data_entries = []
-    for ip, path, the_type in maps:
+    for ip, path_str, the_type in maps:
         entry = ip.network_address.packed + bytes([ip.prefixlen, the_type])
         if the_type == 3:
-            path_parts = str(path).split(',')
+            path_parts = str(path_str).split(',')
             path_ip = (ipaddress.IPv6Network((path_parts[0], ip.prefixlen))).network_address
             path_b2d = bytes(path_parts[1] if len(path_parts) >= 2 else '', encoding="utf-8")[0:16]
             if len(path_b2d) < 16:
                 path_b2d = path_b2d + (b'\0' * (16 - len(path_b2d)))
             path_extra = b'\0' * 24
             path = (1, path_ip.packed + path_b2d + path_extra)
+        elif the_type == 4:
+            header_split = str(path_str).split(';', maxsplit=1)
+            if len(header_split) < 2:
+                continue
+            header_data = [int(a) for a in header_split[0].split(',')]
+            header_bin = struct.pack('>BBBBIIIIIII', *header_data)
+            path = (1, header_bin + bytes(path_str, encoding="utf-8"))
+        else:
+            path = (1, bytes(path_str, encoding="utf-8"))
         if path not in path_map:
-            if the_type == 3:
-                new_offset = len(path_data)
-                new_data = path[1]
-                new_length = len(new_data)
-            else:
-                new_offset = len(path_data)
-                new_data = bytes(path, encoding="utf-8")
-                new_data_pad_length = ((len(new_data) + 7) >> 3) << 3
-                new_data = new_data + (b'\0' * (new_data_pad_length - len(new_data)))
-                new_length = len(new_data)
+            new_offset = len(path_data)
+            new_data = path[1]
+            new_data_pad_length = ((len(new_data) + 7) >> 3) << 3
+            new_data = new_data + (b'\0' * (new_data_pad_length - len(new_data)))
+            new_length = len(new_data)
             path_data = path_data + new_data
             path_map[path] = (new_offset, new_length)
         else:

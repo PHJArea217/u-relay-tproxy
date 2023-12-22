@@ -3,6 +3,11 @@
 #include <stdlib.h>
 #include "type4.h"
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <stdio.h>
 static uint32_t extract_ipv6_shift(uint64_t ip[2], uint8_t shift) {
 	if (shift >= 64) return ip[0] >> (shift - 64);
 	if (shift > 32) return (ip[0] << (64 - shift)) | (ip[1] >> shift);
@@ -32,7 +37,7 @@ static int compare_idxf_ent(const void *a, const void *b) {
 	return 0;
 #endif
 }
-struct idx_file *find_file(uint32_t idx) {
+static struct idx_file *find_file(uint32_t idx) {
 	struct idx_file dummy_idxf = {idx, 0, NULL, 0};
 	return bsearch(&dummy_idxf, idxf_head, idxf_size, sizeof(struct idx_file), compare_idxf);
 }
@@ -52,7 +57,7 @@ int get_domain(uint8_t ip[16], struct type4_data *data, char domain_result[128])
 		return 0;
 	}
 	struct idxf_ent dummy_ent = {htonl(idx_ent[1]), 0};
-	struct idxf_ent *found_ent = bsearch(&dummy_ent, &file_hdr[1], nr_entries, sizeof(struct idxf_ent), compare_idxf_ent);
+	struct idxf_ent *found_ent = bsearch(&dummy_ent, (const void *) &file_hdr[1], nr_entries, sizeof(struct idxf_ent), compare_idxf_ent);
 	if (!found_ent) return 0;
 	uint64_t data_offset = start_of_data + (((uint64_t) ntohl(found_ent->data_offset)) << 2);
 	int is_empty = 1;
@@ -80,4 +85,60 @@ fill_domain:;
 		}
 	}
 	return 1;
+}
+int init_idxf_array(const char *config_s) {
+	char *cs = strdup(config_s);
+	if (!cs) return 0;
+	char *saveptr = NULL;
+	struct idx_file *list_head = NULL;
+	size_t list_size = 0;
+	for (char *t = strtok_r(cs, ";", &saveptr); t; t = strtok_r(NULL, ";", &saveptr)) {
+		struct idx_file *list_head_new = reallocarray(list_head, ++list_size, sizeof(struct idx_file));
+		if (!list_head_new) {
+			goto fail;
+		}
+		list_head = list_head_new;
+		struct idx_file *curr_idx = &list_head[list_size-1];
+		memset(curr_idx, 0, sizeof(struct idx_file));
+		char num_buf[21] = {0};
+		char *val_buf = NULL;
+		for (int i = 0; i < 20; i++) {
+			if (t[i] == '=') {val_buf = &t[i+1]; goto is_file;}
+			if (t[i] == ',') {val_buf = &t[i+1]; goto is_domain;}
+			num_buf[i] = t[i];
+		}
+		goto fail;
+is_file:
+		curr_idx->idx = strtoul(num_buf, NULL, 0);
+		int file_fd = open(val_buf, O_RDONLY|O_NOCTTY);
+		if (file_fd < 0) goto fail;
+		struct stat st = {0};
+		if (fstat(file_fd, &st)) {close(file_fd); goto fail;}
+		void *m = mmap(NULL, st.st_size, PROT_READ, MAP_SHARED, file_fd, 0);
+		if (m == MAP_FAILED) {
+			close(file_fd);
+			goto fail;
+		}
+		close(file_fd);
+		curr_idx->base = m;
+		curr_idx->flags = 0;
+		curr_idx->len = st.st_size;
+		continue;
+is_domain:
+		curr_idx->idx = strtoul(num_buf, NULL, 0);
+		curr_idx->flags = IDXF_FLAGS_DIRECT_DOMAIN;
+		char *new_str = strdup(val_buf);
+		if (!new_str) goto fail;
+		curr_idx->len = strlen(new_str);
+		curr_idx->base = new_str;
+	}
+	idxf_head = list_head;
+	idxf_size = list_size;
+	return 1;
+fail:
+	perror("liburelay-tproxy failed");
+	free(cs);
+	/* TODO free each element in list_head */
+	free(list_head);
+	return 0;
 }

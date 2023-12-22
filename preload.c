@@ -14,8 +14,10 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include "type4.h"
 extern uint8_t subnet_mask_data[129][16];
 struct data_entry {
 	uint8_t subnet_addr[16];
@@ -66,7 +68,7 @@ static void int16tonum(uint16_t n, char *num) {
 	num[0] = '0' + (n % 10);
 }
 static int (*real_connect)(int, const struct sockaddr *, socklen_t) = NULL;
-static int (*real_shutdown_func)(int, int);
+static int (*real_shutdown_func)(int, int) = NULL;
 static struct data_header my_local_header;
 static struct data_header *actual_data_header = NULL;
 static size_t actual_data_header_len = 0;
@@ -136,14 +138,30 @@ found:
 	if (data_end > (uint64_t) header_total_size) {
 		return -1;
 	}
+	unsigned char domain_result[140] = {0};
+	size_t addl_hlen = 0;
 	switch (entry.type) {
 		case 0:
 			return -2;
 			break;
+		case 4:
+			if (entry.length < sizeof(struct type4_data)) return -1;
+			if (get_domain((uint8_t *) &sockaddr->sin6_addr, (struct type4_data *) &data_start_offset[entry.offset], &domain_result[3])) {
+				domain_result[0] = 2;
+				domain_result[1] = 0;
+				domain_result[2] = strnlen(&domain_result[3], 128);
+				addl_hlen += domain_result[2];
+				addl_hlen += 3;
+				entry.offset += sizeof(struct type4_data);
+				entry.length -= sizeof(struct type4_data);
+				goto c4_as_2;
+			}
+			return -1;
 		case 1:
 			send_proxy_protocol = 0;
 			/* fallthrough */
 		case 2:
+c4_as_2:;
 			struct sockaddr_un resultant = {AF_UNIX, {0}};
 			uint32_t length = entry.length;
 			if (length > (sizeof(resultant.sun_path) - 1)) length = sizeof(resultant.sun_path) - 1;
@@ -173,14 +191,18 @@ found:
 				return -1;
 			}
 			if (send_proxy_protocol) {
-				struct pp2_header header = {0};
-				memcpy(header.magic, "\r\n\r\n\0\r\nQUIT\n", 12);
-				header.version = 0x21;
-				header.type = 0x21;
-				header.length = htons(sizeof(header.data));
-				memcpy(header.data.ipv6.local, &sockaddr->sin6_addr, sizeof(header.data.ipv6.local));
-				header.data.ipv6.local_port = sockaddr->sin6_port;
-				if (write(s, &header, sizeof(header)) != sizeof(header)) {
+				struct pp2_header header2 = {0};
+				memcpy(header2.magic, "\r\n\r\n\0\r\nQUIT\n", 12);
+				header2.version = 0x21;
+				header2.type = 0x21;
+				size_t total_length = sizeof(header2) + addl_hlen;
+				header2.length = htons(total_length - offsetof(struct pp2_header, data));
+				struct iovec iovs[2] = {{&header2, sizeof(header2)}, {domain_result, addl_hlen}};
+				if (!addl_hlen) {
+					memcpy(header2.data.ipv6.local, &sockaddr->sin6_addr, sizeof(header2.data.ipv6.local));
+				}
+				header2.data.ipv6.local_port = sockaddr->sin6_port;
+				if (writev(s, iovs, 2) != total_length) {
 					close(s);
 					return -1;
 				}
@@ -352,5 +374,9 @@ __attribute__((constructor)) static void _init(void) {
 	real_shutdown_func = shutdown_symbol;
 	char *local_flags_s = getenv("URELAY_TPROXY_LOCAL_FLAGS");
 	if (local_flags_s) local_flags = strtoull(local_flags_s, NULL, 0);
+	local_flags_s = getenv("URELAY_TPROXY_IDX_FILES");
+	if (local_flags_s) {
+		if (!init_idxf_array(local_flags_s)) abort();
+	}
 }
 

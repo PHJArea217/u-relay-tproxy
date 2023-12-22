@@ -25,3 +25,5 @@ struct type4_data {
 	uint32_t ent_offset;
 	uint32_t reserved[3];
 };
+int get_domain(uint8_t ip[16], struct type4_data *data, char domain_result[128]);
+int init_idxf_array(const char *config_s);
