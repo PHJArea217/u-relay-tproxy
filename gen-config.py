@@ -19,7 +19,7 @@ def gen_file(maps):
                 continue
             header_data = [int(a) for a in header_split[0].split(',')]
             header_bin = struct.pack('>BBBBIIIIIII', *header_data)
-            path = (1, header_bin + bytes(path_str, encoding="utf-8"))
+            path = (1, header_bin + bytes(header_split[1], encoding="utf-8"))
         else:
             path = (1, bytes(path_str, encoding="utf-8"))
         if path not in path_map:

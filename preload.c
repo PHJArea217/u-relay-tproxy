@@ -146,7 +146,9 @@ found:
 			break;
 		case 4:
 			if (entry.length < sizeof(struct type4_data)) return -1;
-			if (get_domain((uint8_t *) &sockaddr->sin6_addr, (struct type4_data *) &data_start_offset[entry.offset], &domain_result[3])) {
+			struct type4_data data_c;
+			memcpy(&data_c, &data_start_offset[entry.offset], sizeof(data_c));
+			if (get_domain((uint8_t *) &sockaddr->sin6_addr, &data_c, &domain_result[3])) {
 				domain_result[0] = 2;
 				domain_result[1] = 0;
 				domain_result[2] = strnlen(&domain_result[3], 128);

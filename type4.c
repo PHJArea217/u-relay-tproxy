@@ -79,7 +79,10 @@ fill_domain:;
 	}
 	for (int i = 127; i >= 0; i--) {
 		if (domain_result[i] == '#') {
-			if (ip_hex_i < 0) domain_result[i] = '0';
+			if (ip_hex_i < 0) {
+				domain_result[i] = '0';
+				continue;
+			}
 			domain_result[i] = ip_hex[ip_hex_i];
 			ip_hex_i--;
 		}
