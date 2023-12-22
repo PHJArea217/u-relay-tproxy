@@ -1,28 +1,40 @@
 #include <endian.h>
+#include <arpa/inet.h>
 #include <stdlib.h>
 #include "type4.h"
-uint32_t extract_ipv6_shift(uint64_t ip[2], uint8_t shift) {
+#include <string.h>
+static uint32_t extract_ipv6_shift(uint64_t ip[2], uint8_t shift) {
 	if (shift >= 64) return ip[0] >> (shift - 64);
 	if (shift > 32) return (ip[0] << (64 - shift)) | (ip[1] >> shift);
 	return ip[1] >> shift;
 }
-void extract_idx_ent(uint8_t ip[16], struct type4_data *data, uint32_t *idx_ent) {
-	uint64_t ip_words[2] = {be64toh(*(uint64_t *)ip[0]), be64toh(*(uint64_t *)ip[1])};
+static void extract_idx_ent(uint8_t ip[16], struct type4_data *data, uint32_t *idx_ent) {
+	uint64_t ip_words[2] = {be64toh(*(uint64_t *)&ip[0]), be64toh(*(uint64_t *)&ip[8])};
 	idx_ent[0] = be32toh(data->idx_offset) + (extract_ipv6_shift(ip_words, data->idx_shift) & be32toh(data->idx_mask));
 	idx_ent[1] = be32toh(data->ent_offset) + (extract_ipv6_shift(ip_words, data->ent_shift) & be32toh(data->ent_mask));
 }
 struct idx_file *idxf_head = NULL;
 size_t idxf_size = 0;
-int compare_idxf(const void *a, const void *b) {
+static int compare_idxf(const void *a, const void *b) {
 	const struct idx_file *af = (const struct idx_file *)a;
 	const struct idx_file *bf = (const struct idx_file *)b;
 	if (af->idx < bf->idx) return -1;
 	if (af->idx > bf->idx) return 1;
 	return 0;
 }
+static int compare_idxf_ent(const void *a, const void *b) {
+	const struct idxf_ent *af = (const struct idxf_ent *)a;
+	const struct idxf_ent *bf = (const struct idxf_ent *)b;
+	return memcmp(&af->idx, &bf->idx, sizeof(af->idx));
+#if 0
+	if (af->idx < bf->idx) return -1;
+	if (af->idx > bf->idx) return 1;
+	return 0;
+#endif
+}
 struct idx_file *find_file(uint32_t idx) {
 	struct idx_file dummy_idxf = {idx, 0, NULL, 0};
-	return bsearch(idxf_head, sizeof(struct idx_file), idxf_size, compare_idxf);
+	return bsearch(&dummy_idxf, idxf_head, idxf_size, sizeof(struct idx_file), compare_idxf);
 }
 int get_domain(uint8_t ip[16], struct type4_data *data, char domain_result[128]) {
 	uint32_t idx_ent[2] = {0, 0};
@@ -40,7 +52,7 @@ int get_domain(uint8_t ip[16], struct type4_data *data, char domain_result[128])
 		return 0;
 	}
 	struct idxf_ent dummy_ent = {htonl(idx_ent[1]), 0};
-	struct idxf_ent *found_ent = bsearch(&file_hdr[1], sizeof(struct idxf_ent), nr_entries, compare_idxf_ent);
+	struct idxf_ent *found_ent = bsearch(&dummy_ent, &file_hdr[1], nr_entries, sizeof(struct idxf_ent), compare_idxf_ent);
 	if (!found_ent) return 0;
 	uint64_t data_offset = start_of_data + (((uint64_t) ntohl(found_ent->data_offset)) << 2);
 	int is_empty = 1;
