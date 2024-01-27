@@ -13,10 +13,10 @@ with open(out_fn + '.tmp', 'wb') as out_file:
 		entries.append((i, struct.pack('>II', i, domain_position >> 2)))
 		domain_position = domain_position + len(extra) + len(domain_buf)
 		assert (domain_position & 3) == 0
-	out_fn.write(struct.pack('>II', 0xf200a01e, len(entries)))
+	out_file.write(struct.pack('>II', 0xf200a01e, len(entries)))
 	entries.sort(key=lambda x: x[0])
 	for e in entries:
-		out_fn.write(e[1])
+		out_file.write(e[1])
 	for b in domain_buffers:
-		out_fn.write(b)
+		out_file.write(b)
 os.rename(out_fn + '.tmp', out_fn)

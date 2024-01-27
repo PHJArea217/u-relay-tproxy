@@ -69,11 +69,13 @@ static void int16tonum(uint16_t n, char *num) {
 }
 static int (*real_connect)(int, const struct sockaddr *, socklen_t) = NULL;
 static int (*real_shutdown_func)(int, int) = NULL;
+static ssize_t (*real_sendmsg_func)(int, const struct msghdr *, int) = NULL;
 static struct data_header my_local_header;
 static struct data_header *actual_data_header = NULL;
 static size_t actual_data_header_len = 0;
 static uint64_t local_flags = 0;
 #define LOCAL_FLAG_SHUTDOWN_HACK 0x10000
+#define LOCAL_FLAG_FASTOPEN_HACK 0x20000
 __attribute__((visibility("default")))
 int shutdown(int s, int which) {
 	if (local_flags & LOCAL_FLAG_SHUTDOWN_HACK) {
@@ -369,6 +371,9 @@ __attribute__((constructor)) static void _init(void) {
 	void *connect_symbol = dlsym(RTLD_NEXT, "connect");
 	if (connect_symbol == NULL) abort();
 	real_connect = connect_symbol;
+	void *sendmsg_symbol = dlsym(RTLD_NEXT, "sendmsg");
+	if (sendmsg_symbol == NULL) abort();
+	real_sendmsg_func = sendmsg_symbol;
 	void *shutdown_symbol = dlsym(RTLD_NEXT, "shutdown");
 	if (!shutdown_symbol) {
 		abort();
@@ -381,4 +386,13 @@ __attribute__((constructor)) static void _init(void) {
 		if (!init_idxf_array(local_flags_s)) abort();
 	}
 }
-
+__attribute__((visibility("default")))
+ssize_t sendmsg(int fd, const struct msghdr *mh, int flags) {
+	if (local_flags & LOCAL_FLAG_FASTOPEN_HACK) {
+		if (flags & MSG_FASTOPEN) {
+			errno = EPIPE;
+			return -1;
+		}
+	}
+	return real_sendmsg_func(fd, mh, flags);
+}
