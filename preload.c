@@ -68,6 +68,8 @@ static void int16tonum(uint16_t n, char *num) {
 	num[0] = '0' + (n % 10);
 }
 static int (*real_connect)(int, const struct sockaddr *, socklen_t) = NULL;
+static int (*real_getsockname)(int, struct sockaddr *, socklen_t *) = NULL;
+static int (*real_getpeername)(int, struct sockaddr *, socklen_t *) = NULL;
 static int (*real_shutdown_func)(int, int) = NULL;
 static ssize_t (*real_sendmsg_func)(int, const struct msghdr *, int) = NULL;
 static struct data_header my_local_header;
@@ -76,6 +78,43 @@ static size_t actual_data_header_len = 0;
 static uint64_t local_flags = 0;
 #define LOCAL_FLAG_SHUTDOWN_HACK 0x10000
 #define LOCAL_FLAG_FASTOPEN_HACK 0x20000
+#define LOCAL_FLAG_GETSOCKNAME_HACK 0x40000
+__attribute__((visibility("default")))
+int getsockname(int fd, struct sockaddr *sa, socklen_t *len) {
+	if (local_flags & LOCAL_FLAG_GETSOCKNAME_HACK) {
+		unsigned int oldlen = *len;
+		socklen_t newlen = oldlen;
+		if (real_getsockname(fd, sa, &newlen)) return -1;
+		if ((newlen == 2) && (sa->sa_family == AF_UNIX)) {
+			struct sockaddr_in6 dummy = {.sin6_family = AF_INET6};
+			if (oldlen >= sizeof(dummy)) oldlen = sizeof(dummy);
+			memcpy(sa, &dummy, oldlen);
+			*len = sizeof(dummy);
+		} else {
+			*len = newlen;
+		}
+		return 0;
+	}
+	return real_getsockname(fd, sa, len);
+}
+__attribute__((visibility("default")))
+int getpeername(int fd, struct sockaddr *sa, socklen_t *len) {
+	if (local_flags & LOCAL_FLAG_GETSOCKNAME_HACK) {
+		unsigned int oldlen = *len;
+		socklen_t newlen = oldlen;
+		if (real_getpeername(fd, sa, &newlen)) return -1;
+		if ((newlen >= 2) && (sa->sa_family == AF_UNIX)) {
+			struct sockaddr_in6 dummy = {.sin6_family = AF_INET6};
+			if (oldlen >= sizeof(dummy)) oldlen = sizeof(dummy);
+			memcpy(sa, &dummy, oldlen);
+			*len = sizeof(dummy);
+		} else {
+			*len = newlen;
+		}
+		return 0;
+	}
+	return real_getpeername(fd, sa, len);
+}
 __attribute__((visibility("default")))
 int shutdown(int s, int which) {
 	if (local_flags & LOCAL_FLAG_SHUTDOWN_HACK) {
@@ -374,6 +413,12 @@ __attribute__((constructor)) static void _init(void) {
 	void *sendmsg_symbol = dlsym(RTLD_NEXT, "sendmsg");
 	if (sendmsg_symbol == NULL) abort();
 	real_sendmsg_func = sendmsg_symbol;
+	void *getsockname_symbol = dlsym(RTLD_NEXT, "getsockname");
+	if (getsockname_symbol == NULL) abort();
+	real_getsockname = getsockname_symbol;
+	void *getpeername_symbol = dlsym(RTLD_NEXT, "getpeername");
+	if (getpeername_symbol == NULL) abort();
+	real_getpeername = getpeername_symbol;
 	void *shutdown_symbol = dlsym(RTLD_NEXT, "shutdown");
 	if (!shutdown_symbol) {
 		abort();
@@ -395,4 +440,10 @@ ssize_t sendmsg(int fd, const struct msghdr *mh, int flags) {
 		}
 	}
 	return real_sendmsg_func(fd, mh, flags);
+}
+__attribute__((visibility("default")))
+ssize_t sendto(int fd, const void *data, size_t len, int flags, const struct sockaddr *a, socklen_t al) {
+	struct iovec iov = {.iov_base = (void *) data, .iov_len = len};
+	struct msghdr mh = {.msg_name = (void *) a, .msg_namelen = al, .msg_iov = &iov, .msg_iovlen = 1, .msg_control = NULL, .msg_controllen = 0, .msg_flags = 0};
+	return sendmsg(fd, &mh, flags);
 }
