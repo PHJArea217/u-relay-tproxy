@@ -82,10 +82,14 @@ static uint64_t local_flags = 0;
 __attribute__((visibility("default")))
 int getsockname(int fd, struct sockaddr *sa, socklen_t *len) {
 	if (local_flags & LOCAL_FLAG_GETSOCKNAME_HACK) {
-		unsigned int oldlen = *len;
+		int oldlen = *len;
+		if (oldlen < 0) {
+			errno = EINVAL;
+			return -1;
+		}
 		socklen_t newlen = oldlen;
 		if (real_getsockname(fd, sa, &newlen)) return -1;
-		if ((newlen == 2) && (sa->sa_family == AF_UNIX)) {
+		if ((oldlen >= 2) && (newlen == 2) && (sa->sa_family == AF_UNIX)) {
 			struct sockaddr_in6 dummy = {.sin6_family = AF_INET6};
 			if (oldlen >= sizeof(dummy)) oldlen = sizeof(dummy);
 			memcpy(sa, &dummy, oldlen);
@@ -100,10 +104,14 @@ int getsockname(int fd, struct sockaddr *sa, socklen_t *len) {
 __attribute__((visibility("default")))
 int getpeername(int fd, struct sockaddr *sa, socklen_t *len) {
 	if (local_flags & LOCAL_FLAG_GETSOCKNAME_HACK) {
-		unsigned int oldlen = *len;
+		int oldlen = *len;
+		if (oldlen < 0) {
+			errno = EINVAL;
+			return -1;
+		}
 		socklen_t newlen = oldlen;
 		if (real_getpeername(fd, sa, &newlen)) return -1;
-		if ((newlen >= 2) && (sa->sa_family == AF_UNIX)) {
+		if ((oldlen >= 2) && (newlen >= 2) && (sa->sa_family == AF_UNIX)) {
 			struct sockaddr_in6 dummy = {.sin6_family = AF_INET6};
 			if (oldlen >= sizeof(dummy)) oldlen = sizeof(dummy);
 			memcpy(sa, &dummy, oldlen);
