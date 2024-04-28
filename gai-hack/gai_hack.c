@@ -14,6 +14,7 @@ typedef int (*real_gai_t)(const char *, const char *, const struct addrinfo *, s
 static uint64_t gaihack_flags = 0;
 static char *sni_proxy_host = NULL;
 static char *sm_dirname = NULL;
+static char *my_logfile = NULL;
 static real_gai_t gai_func_real = NULL;
 struct my_domain {
 	uint64_t dot_positions;
@@ -201,6 +202,18 @@ do_lo:
 	if (sm_hi_result == 1) return EAI_AGAIN;
 	if (strcmp(domain_r.domain_name, "localhost") == 0) return EAI_AGAIN;
 	if (is_localhost) return EAI_AGAIN;
+	if (my_logfile) {
+		int logfile_fd = open(my_logfile, O_WRONLY|O_APPEND|O_CREAT|O_CLOEXEC, 0600);
+		if (logfile_fd >= 0) {
+			char buf[300] = {0};
+			ssize_t n = snprintf(buf, 298, "sni_proxy_needed_for \"%s\"\n", domain_r.domain_name);
+			if (n > 0) {
+				if (n >= 298) n = 298;
+				write(logfile_fd, buf, n);
+			}
+			close(logfile_fd);
+		}
+	}
 	if (sni_proxy_host) {
 		return real_gai(sni_proxy_host, service, &hints_local, res);
 	}
@@ -223,6 +236,12 @@ static __attribute__((constructor)) void init(void) {
 		char *sm_dirname_a = strdup(sm_dirname_);
 		if (!sm_dirname_a) abort();
 		sni_proxy_host = sm_dirname_a;
+	}
+	sm_dirname_ = getenv("PJTL_GAIHACK_LOGFILE");
+	if (sm_dirname_) {
+		char *sm_dirname_a = strdup(sm_dirname_);
+		if (!sm_dirname_a) abort();
+		my_logfile = sm_dirname_a;
 	}
 	sm_dirname_ = getenv("PJTL_GAIHACK_FLAGS");
 	if (sm_dirname_) {
