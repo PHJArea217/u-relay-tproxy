@@ -35,21 +35,6 @@ struct data_header {
 	uint32_t reserved;
 	struct data_entry entries[0];
 };
-struct pp2_header {
-	uint8_t magic[12];
-	uint8_t version;
-	uint8_t type;
-	uint16_t length;
-	union {
-		struct {
-			uint8_t remote[16];
-			uint8_t local[16];
-			uint16_t remote_port;
-			uint16_t local_port;
-		} ipv6;
-		char other[216];
-	} data;
-};
 struct type3_data {
 	uint8_t ipv6_addr[16];
 	uint8_t bindtodevice[16];
@@ -189,20 +174,39 @@ found:
 	}
 	unsigned char domain_result[140] = {0};
 	size_t addl_hlen = 0;
+	struct type5_data data_e = {.version = 1, .flags = TYPE5_FLAG_KEEP_OUTER_PORT};
 	switch (entry.type) {
 		case 0:
 			return -2;
 			break;
+		case 5:
+			if (entry.length < sizeof(struct type5_data)) return -1;
+			memcpy(&data_e, &data_start_offset[entry.offset], sizeof(data_e));
+			if (data_e.authority_selector.version == 1) {
+				if (get_domain((uint8_t *) &sockaddr->sin6_addr, &data_e.authority_selector, &domain_result[3])) {
+					domain_result[0] = 2;
+					domain_result[1] = 0;
+					domain_result[2] = strnlen(&domain_result[3], 128);
+					addl_hlen += domain_result[2];
+					addl_hlen += 3;
+					entry.offset += sizeof(struct type5_data);
+					entry.length -= sizeof(struct type5_data);
+					goto c4_as_2;
+				}
+				return -1;
+			} else {
+				goto c4_as_2;
+			}
 		case 4:
 			if (entry.length < sizeof(struct type4_data)) return -1;
-			struct type4_data data_c;
-			memcpy(&data_c, &data_start_offset[entry.offset], sizeof(data_c));
-			if (get_domain((uint8_t *) &sockaddr->sin6_addr, &data_c, &domain_result[3])) {
+			memcpy(&data_e.authority_selector, &data_start_offset[entry.offset], sizeof(data_e.authority_selector));
+			if (get_domain((uint8_t *) &sockaddr->sin6_addr, &data_e.authority_selector, &domain_result[3])) {
 				domain_result[0] = 2;
 				domain_result[1] = 0;
 				domain_result[2] = strnlen(&domain_result[3], 128);
 				addl_hlen += domain_result[2];
 				addl_hlen += 3;
+				data_e.outer_ip_mask = 128; /* outer_ip{,_mask} == ::/128 sets outer_ip = 0 (::) */
 				entry.offset += sizeof(struct type4_data);
 				entry.length -= sizeof(struct type4_data);
 				goto c4_as_2;
@@ -249,10 +253,10 @@ c4_as_2:;
 				size_t total_length = sizeof(header2) + addl_hlen;
 				header2.length = htons(total_length - offsetof(struct pp2_header, data));
 				struct iovec iovs[2] = {{&header2, sizeof(header2)}, {domain_result, addl_hlen}};
-				if (!addl_hlen) {
-					memcpy(header2.data.ipv6.local, &sockaddr->sin6_addr, sizeof(header2.data.ipv6.local));
+				if (apply_t5_data_header(sockaddr, &data_e, &header2)) {
+					close(s);
+					return -1;
 				}
-				header2.data.ipv6.local_port = sockaddr->sin6_port;
 				if (writev(s, iovs, 2) != total_length) {
 					close(s);
 					return -1;
