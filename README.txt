@@ -16,7 +16,7 @@ this, namely, and this applies to all LD_PRELOAD libraries:
  message. Not implemented here, but can still be a future idea.
 * Applications written in golang (go) can be compiled with gccgo to make a
  dynamically linked executable which uses libc functions to make system calls.
- Such an executable can be used for LD_PRELOAD.
+ Such an executable can be used with LD_PRELOAD.
 
 `make PARACONTAINERIZATION=1` makes a "paracontainerzed"
 (similar to paravirtualization, but with containers instead of virtual machines)
