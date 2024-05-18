@@ -34,15 +34,24 @@ env LD_PRELOAD=/path/to/liburelay-tproxy.so \
 [PJTL_GAIHACK_...=...]
 
 The recognized environment variables are:
-URELAY_TPROXY_FILE  -- specify a configuration file. This must be in binary form.
+URELAY_TPROXY_FILE  -- specify a configuration file. Must be in binary form.
                        My miscutils repo contains u-relay-tproxy-asmgen, which
                        can be used to generate this file.
 URELAY_TPROXY_LOCAL_FLAGS -- specify a numeric flags word (will be parsed by
                        strtoull(flags, NULL, 0)). bit positions mean:
-                       0x10000 ("shutdown hack") -- SHUT_RD aliased to SHUT_RDWR in Unix domain sockets, intended for slirp4netns, but doesn't seem to fix the busy loop issue.
-                       0x20000 ("fastopen hack") -- if a sendmsg/sendto is attempted with the MSG_FASTOPEN flag set, then it will just return -1 with errno=EPIPE without sending anything. Intended for Unbound DNS server.
-                       0x40000 ("getsockname hack") -- if a getsockname call returns AF_UNIX, then instead make it return AF_INET6 with sin6_addr = :: and sin6_port = 0.
-                       0x80000 ("GAI hack") -- also enable the gai-hack module. Initially a separate library, but is now integrated.
+                       0x10000 ("shutdown hack") - SHUT_RD aliased to SHUT_RDWR
+                           in Unix domain sockets, intended for slirp4netns, but
+                           doesn't seem to fix the busy loop issue.
+                       0x20000 ("fastopen hack") - if a sendmsg/sendto is 
+                           attempted with the MSG_FASTOPEN flag set, then it
+                           will just return -1 with errno=EPIPE without sending
+                           anything. Intended for Unbound DNS server.
+                       0x40000 ("getsockname hack") - if a getsockname call
+                           returns AF_UNIX, then instead make it return AF_INET6
+                           with sin6_addr = :: and sin6_port = 0. Intended for
+                           Mozilla Firefox.
+                       0x80000 ("GAI hack") - also enable the gai-hack module.
+                           Initially a separate library, but is now integrated.
 URELAY_TPROXY_IDX_FILES -- IDX_FILES
 IDX_FILES := IDX_FILE | IDX_FILE ";" IDX_FILES
 IDX_FILE := number "," domain_name | number "=" filename
