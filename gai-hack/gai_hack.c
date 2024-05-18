@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <errno.h>
 typedef int (*real_gai_t)(const char *, const char *, const struct addrinfo *, struct addrinfo **);
+#define GAIHACK_INITIALIZED 0x100000000ULL
 static uint64_t gaihack_flags = 0;
 static char *sni_proxy_host = NULL;
 static char *sm_dirname = NULL;
@@ -221,10 +222,20 @@ do_lo:
 do_real_gai:
 	return real_gai(node, service, &hints_local, res);
 }
+__attribute__((visibility("default")))
 int getaddrinfo /* _override */(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res) {
-	return gai_hack(node, service, hints, res, gai_func_real);
+	if (gaihack_flags & GAIHACK_INITIALIZED) {
+		return gai_hack(node, service, hints, res, gai_func_real);
+	}
+	return gai_func_real(node, service, hints, res);
 }
-static __attribute__((constructor)) void init(void) {
+void gai_hack_init(int do_init, void *(*dlsym_func)(void *, const char *)) {
+	real_gai_t real_gai_func = dlsym_func(RTLD_NEXT, "getaddrinfo");
+	if (!real_gai_func) {
+		fprintf(stderr, "Could not get real getaddrinfo(): %s\n", dlerror());
+		abort();
+	}
+	if (!do_init) return;
 	char *sm_dirname_ = getenv("PJTL_GAIHACK_STATICDIR");
 	if (sm_dirname_) {
 		char *sm_dirname_a = strdup(sm_dirname_);
@@ -247,10 +258,6 @@ static __attribute__((constructor)) void init(void) {
 	if (sm_dirname_) {
 		gaihack_flags = strtoull(sm_dirname_, NULL, 0);
 	}
-	real_gai_t real_gai_func = dlsym(RTLD_NEXT, "getaddrinfo");
-	if (!real_gai_func) {
-		fprintf(stderr, "Could not get real getaddrinfo(): %s\n", dlerror());
-		abort();
-	}
 	gai_func_real = real_gai_func;
+	gaihack_flags |= GAIHACK_INITIALIZED;
 }

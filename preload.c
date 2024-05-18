@@ -61,9 +61,14 @@ static struct data_header my_local_header;
 static struct data_header *actual_data_header = NULL;
 static size_t actual_data_header_len = 0;
 static uint64_t local_flags = 0;
+
+void *dlsym_func(void *handle, const char *symbol_name);
+__asm__(".symver dlsym_func,dlsym@");
+
 #define LOCAL_FLAG_SHUTDOWN_HACK 0x10000
 #define LOCAL_FLAG_FASTOPEN_HACK 0x20000
 #define LOCAL_FLAG_GETSOCKNAME_HACK 0x40000
+#define LOCAL_FLAG_INIT_GAIHACK 0x80000
 __attribute__((visibility("default")))
 int getsockname(int fd, struct sockaddr *sa, socklen_t *len) {
 	if (local_flags & LOCAL_FLAG_GETSOCKNAME_HACK) {
@@ -419,25 +424,26 @@ __attribute__((constructor)) static void _init(void) {
 		my_local_header.nr_subnet_entries = ntohs(my_local_header.nr_subnet_entries);
 		if (actual_data_header_len < (offsetof(struct data_header, entries) + (my_local_header.nr_subnet_entries * sizeof(struct data_entry)))) abort();
 	}
-	void *connect_symbol = dlsym(RTLD_NEXT, "connect");
+	void *connect_symbol = dlsym_func(RTLD_NEXT, "connect");
 	if (connect_symbol == NULL) abort();
 	real_connect = connect_symbol;
-	void *sendmsg_symbol = dlsym(RTLD_NEXT, "sendmsg");
+	void *sendmsg_symbol = dlsym_func(RTLD_NEXT, "sendmsg");
 	if (sendmsg_symbol == NULL) abort();
 	real_sendmsg_func = sendmsg_symbol;
-	void *getsockname_symbol = dlsym(RTLD_NEXT, "getsockname");
+	void *getsockname_symbol = dlsym_func(RTLD_NEXT, "getsockname");
 	if (getsockname_symbol == NULL) abort();
 	real_getsockname = getsockname_symbol;
-	void *getpeername_symbol = dlsym(RTLD_NEXT, "getpeername");
+	void *getpeername_symbol = dlsym_func(RTLD_NEXT, "getpeername");
 	if (getpeername_symbol == NULL) abort();
 	real_getpeername = getpeername_symbol;
-	void *shutdown_symbol = dlsym(RTLD_NEXT, "shutdown");
+	void *shutdown_symbol = dlsym_func(RTLD_NEXT, "shutdown");
 	if (!shutdown_symbol) {
 		abort();
 	}
 	real_shutdown_func = shutdown_symbol;
 	char *local_flags_s = getenv("URELAY_TPROXY_LOCAL_FLAGS");
 	if (local_flags_s) local_flags = strtoull(local_flags_s, NULL, 0);
+	gai_hack_init(!!(local_flags & LOCAL_FLAG_INIT_GAIHACK), dlsym_func);
 	local_flags_s = getenv("URELAY_TPROXY_IDX_FILES");
 	if (local_flags_s) {
 		if (!init_idxf_array(local_flags_s)) abort();

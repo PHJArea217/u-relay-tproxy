@@ -70,3 +70,4 @@ struct pp2_header {
 int apply_t5_data_header(const struct sockaddr_in6 *in6, const struct type5_data *data, struct pp2_header *header);
 int get_domain(uint8_t ip[16], struct type4_data *data, char domain_result[128]);
 int init_idxf_array(const char *config_s);
+void gai_hack_init(int do_init, void *(*dlsym_func)(void *, const char *));
