@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <errno.h>
+#include "../type4.h"
 typedef int (*real_gai_t)(const char *, const char *, const struct addrinfo *, struct addrinfo **);
 #define GAIHACK_INITIALIZED 0x100000000ULL
 static uint64_t gaihack_flags = 0;
@@ -229,10 +230,10 @@ int getaddrinfo /* _override */(const char *node, const char *service, const str
 	}
 	return gai_func_real(node, service, hints, res);
 }
-void gai_hack_init(int do_init, void *(*dlsym_func)(void *, const char *)) {
-	real_gai_t real_gai_func = dlsym_func(RTLD_NEXT, "getaddrinfo");
+void gai_hack_init(int do_init, struct urtp_functions *functable) {
+	real_gai_t real_gai_func = functable->_dlsym(RTLD_NEXT, "getaddrinfo");
 	if (!real_gai_func) {
-		fprintf(stderr, "Could not get real getaddrinfo(): %s\n", dlerror());
+		fprintf(stderr, "Could not get real getaddrinfo(): %s\n", functable->_dlerror());
 		abort();
 	}
 	if (!do_init) return;

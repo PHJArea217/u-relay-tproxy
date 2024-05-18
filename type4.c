@@ -89,14 +89,16 @@ fill_domain:;
 	}
 	return 1;
 }
-int init_idxf_array(const char *config_s) {
+int init_idxf_array(const char *config_s, struct urtp_functions *functable) {
 	char *cs = strdup(config_s);
 	if (!cs) return 0;
 	char *saveptr = NULL;
 	struct idx_file *list_head = NULL;
 	size_t list_size = 0;
 	for (char *t = strtok_r(cs, ";", &saveptr); t; t = strtok_r(NULL, ";", &saveptr)) {
-		struct idx_file *list_head_new = reallocarray(list_head, ++list_size, sizeof(struct idx_file));
+		size_t new_size = 0;
+		if (__builtin_mul_overflow(++list_size, sizeof(struct idx_file), &new_size)) goto fail;
+		struct idx_file *list_head_new = realloc(list_head, new_size);
 		if (!list_head_new) {
 			goto fail;
 		}
@@ -115,9 +117,9 @@ is_file:
 		curr_idx->idx = strtoul(num_buf, NULL, 0);
 		int file_fd = open(val_buf, O_RDONLY|O_NOCTTY);
 		if (file_fd < 0) goto fail;
-		struct stat st = {0};
-		if (fstat(file_fd, &st)) {close(file_fd); goto fail;}
-		void *m = mmap(NULL, st.st_size, PROT_READ, MAP_SHARED, file_fd, 0);
+		off_t filesize = lseek(file_fd, 0, SEEK_END);
+		if (filesize < sizeof(struct idxf_hdr)) {close(file_fd); goto fail;}
+		void *m = mmap(NULL, filesize, PROT_READ, MAP_SHARED, file_fd, 0);
 		if (m == MAP_FAILED) {
 			close(file_fd);
 			goto fail;
@@ -125,7 +127,7 @@ is_file:
 		close(file_fd);
 		curr_idx->base = m;
 		curr_idx->flags = 0;
-		curr_idx->len = st.st_size;
+		curr_idx->len = filesize;
 		continue;
 is_domain:
 		curr_idx->idx = strtoul(num_buf, NULL, 0);

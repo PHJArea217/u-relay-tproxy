@@ -62,8 +62,20 @@ static struct data_header *actual_data_header = NULL;
 static size_t actual_data_header_len = 0;
 static uint64_t local_flags = 0;
 
+#ifdef URTP_FORCE_UNVERSIONED_SYMBOLS
 void *dlsym_func(void *handle, const char *symbol_name);
-__asm__(".symver dlsym_func,dlsym@");
+char *dlerror_func(void);
+int fstat_func(int fd, struct stat *st);
+__asm__(
+".irp func, dlerror, dlsym, fstat\n"
+".symver \\func\\()_func,\\func\\()@\n"
+".endr\n"
+);
+#else
+#define dlsym_func dlsym
+#define dlerror_func dlerror
+#define fstat_func fstat
+#endif
 
 #define LOCAL_FLAG_SHUTDOWN_HACK 0x10000
 #define LOCAL_FLAG_FASTOPEN_HACK 0x20000
@@ -387,6 +399,7 @@ do_real_connect:
 	return retval;
 }
 __attribute__((constructor)) static void _init(void) {
+	struct urtp_functions functable = {._dlsym = dlsym_func, ._dlerror = dlerror_func, ._fstat = abort};
 	char *datafile_name = getenv("URELAY_TPROXY_FILE");
 	if (datafile_name) {
 		int datafile_fd = open(datafile_name, O_RDONLY|O_NOCTTY|O_CLOEXEC);
@@ -395,17 +408,13 @@ __attribute__((constructor)) static void _init(void) {
 			abort();
 			return;
 		}
-		struct stat st = {0};
-		if (fstat(datafile_fd, &st)) {
-			abort();
-			return;
-		}
-		if (st.st_size < sizeof(my_local_header)) {
+		off_t file_size = lseek(datafile_fd, 0, SEEK_END);
+		if (file_size < sizeof(my_local_header)) {
 			fprintf(stderr, "tproxy-preload: File empty or less than minimum size\n");
 			abort();
 			return;
 		}
-		void *datafile_mmap = mmap(NULL, st.st_size, PROT_READ, MAP_SHARED, datafile_fd, 0);
+		void *datafile_mmap = mmap(NULL, file_size, PROT_READ, MAP_SHARED, datafile_fd, 0);
 		if (datafile_mmap == MAP_FAILED) {
 			fprintf(stderr, "tproxy-preload: Failed to mmap %s: %s\n", datafile_name, strerror(errno));
 			abort();
@@ -413,7 +422,7 @@ __attribute__((constructor)) static void _init(void) {
 		}
 		close(datafile_fd);
 		actual_data_header = datafile_mmap;
-		actual_data_header_len = st.st_size;
+		actual_data_header_len = file_size;
 		if (actual_data_header_len < sizeof(my_local_header)) abort();
 		memcpy(&my_local_header, actual_data_header, sizeof(my_local_header));
 		if (my_local_header.magic != htonl(0xf200a01fU)) {
@@ -443,10 +452,10 @@ __attribute__((constructor)) static void _init(void) {
 	real_shutdown_func = shutdown_symbol;
 	char *local_flags_s = getenv("URELAY_TPROXY_LOCAL_FLAGS");
 	if (local_flags_s) local_flags = strtoull(local_flags_s, NULL, 0);
-	gai_hack_init(!!(local_flags & LOCAL_FLAG_INIT_GAIHACK), dlsym_func);
+	gai_hack_init(!!(local_flags & LOCAL_FLAG_INIT_GAIHACK), &functable);
 	local_flags_s = getenv("URELAY_TPROXY_IDX_FILES");
 	if (local_flags_s) {
-		if (!init_idxf_array(local_flags_s)) abort();
+		if (!init_idxf_array(local_flags_s, &functable)) abort();
 	}
 }
 __attribute__((visibility("default")))
