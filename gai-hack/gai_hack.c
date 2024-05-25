@@ -236,6 +236,7 @@ void gai_hack_init(int do_init, struct urtp_functions *functable) {
 		fprintf(stderr, "Could not get real getaddrinfo(): %s\n", functable->_dlerror());
 		abort();
 	}
+	gai_func_real = real_gai_func;
 	if (!do_init) return;
 	char *sm_dirname_ = getenv("PJTL_GAIHACK_STATICDIR");
 	if (sm_dirname_) {
@@ -259,6 +260,5 @@ void gai_hack_init(int do_init, struct urtp_functions *functable) {
 	if (sm_dirname_) {
 		gaihack_flags = strtoull(sm_dirname_, NULL, 0);
 	}
-	gai_func_real = real_gai_func;
 	gaihack_flags |= GAIHACK_INITIALIZED;
 }
