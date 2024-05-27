@@ -217,6 +217,7 @@ found:
 		case 4:
 			if (entry.length < sizeof(struct type4_data)) return -1;
 			memcpy(&data_e.authority_selector, &data_start_offset[entry.offset], sizeof(data_e.authority_selector));
+			if (data_e.authority_selector.version != 1) return -1;
 			if (get_domain((uint8_t *) &sockaddr->sin6_addr, &data_e.authority_selector, &domain_result[3])) {
 				domain_result[0] = 2;
 				domain_result[1] = 0;
