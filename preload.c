@@ -211,9 +211,10 @@ found:
 					goto c4_as_2;
 				}
 				return -1;
-			} else {
+			} else if (data_e.authority_selector.version == 0) {
 				goto c4_as_2;
 			}
+			return -1;
 		case 4:
 			if (entry.length < sizeof(struct type4_data)) return -1;
 			memcpy(&data_e.authority_selector, &data_start_offset[entry.offset], sizeof(data_e.authority_selector));
