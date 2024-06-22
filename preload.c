@@ -212,6 +212,8 @@ found:
 				}
 				return -1;
 			} else if (data_e.authority_selector.version == 0) {
+				entry.offset += sizeof(struct type5_data);
+				entry.length -= sizeof(struct type5_data);
 				goto c4_as_2;
 			}
 			return -1;

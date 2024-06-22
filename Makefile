@@ -1,4 +1,4 @@
-CFLAGS := -O2 -g -stack-protector-strong
+CFLAGS := -O2 -g -fstack-protector-strong
 ifeq ($(PARACONTAINERIZATION),1)
 # older libc versions didn't have dl* functions in libc.so.6, so force linking to libdl
 CFLAGS_E := -DURTP_FORCE_UNVERSIONED_SYMBOLS=1 -Wl,-z,relro,-z,now,--push-state,--as-needed -ldl -Wl,--pop-state
