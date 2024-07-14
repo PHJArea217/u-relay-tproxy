@@ -75,5 +75,5 @@ struct urtp_functions {
 	char *(*_dlerror)(void);
 	int (*_fstat)(int, struct stat *);
 };
-int init_idxf_array(const char *config_s, struct urtp_functions *functable);
+int init_idxf_array(const char *config_s, int xflags, struct urtp_functions *functable);
 void gai_hack_init(int do_init, struct urtp_functions *functable);

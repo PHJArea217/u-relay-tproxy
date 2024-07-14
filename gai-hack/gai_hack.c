@@ -13,6 +13,7 @@
 #include "../type4.h"
 typedef int (*real_gai_t)(const char *, const char *, const struct addrinfo *, struct addrinfo **);
 #define GAIHACK_INITIALIZED 0x100000000ULL
+#define GAIHACK_UNIX_SOCK 0x10000ULL
 static uint64_t gaihack_flags = 0;
 static char *sni_proxy_host = NULL;
 static char *sm_dirname = NULL;
@@ -23,6 +24,19 @@ struct my_domain {
 	char domain_name[256];
 	char null_guard[8];
 };
+static int init_logfile_fd(void) {
+	if (gaihack_flags & GAIHACK_UNIX_SOCK) {
+		int sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
+		struct sockaddr_un sa = {AF_UNIX, {0}};
+		strncpy(sa.sun_path, my_logfile, sizeof(sa.sun_path);
+		if (connect(sockfd, (struct sockaddr *) &sa, sizeof(sa))) {
+			close(sockfd);
+			return -1;
+		}
+		return sockfd;
+	}
+	return open(my_logfile, O_WRONLY|O_APPEND|O_CLOEXEC|O_NOCTTY|O_CREAT, 0600);
+}
 static int do_parse_domain(const char *name, struct my_domain *d) {
 	const char *namei = name;
 	int starts_with_dot = 0;
@@ -205,7 +219,7 @@ do_lo:
 	if (strcmp(domain_r.domain_name, "localhost") == 0) return EAI_AGAIN;
 	if (is_localhost) return EAI_AGAIN;
 	if (my_logfile) {
-		int logfile_fd = open(my_logfile, O_WRONLY|O_APPEND|O_CREAT|O_CLOEXEC, 0600);
+		int logfile_fd = init_logfile_fd();
 		if (logfile_fd >= 0) {
 			char buf[300] = {0};
 			ssize_t n = snprintf(buf, 298, "sni_proxy_needed_for \"%s\"\n", domain_r.domain_name);

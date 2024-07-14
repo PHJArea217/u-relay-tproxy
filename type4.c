@@ -89,7 +89,16 @@ fill_domain:;
 	}
 	return 1;
 }
-int init_idxf_array(const char *config_s, struct urtp_functions *functable) {
+int init_idxf_array(const char *config_s, int xflags, struct urtp_functions *functable) {
+	const char *contextdir = getenv("URELAY_TPROXY_CONTEXTDIR");
+	int contextdir_fd = AT_FDCWD;
+	if (contextdir) {
+		contextdir_fd = open(contextdir, O_RDONLY|O_CLOEXEC|O_DIRECTORY|O_PATH);
+		if (contextdir_fd < 0) {
+			perror("liburelay-tproxy: cannot open contextdir");
+			return 0;
+		}
+	}
 	char *cs = strdup(config_s);
 	if (!cs) return 0;
 	char *saveptr = NULL;
@@ -110,21 +119,33 @@ int init_idxf_array(const char *config_s, struct urtp_functions *functable) {
 		for (int i = 0; i < 20; i++) {
 			if (t[i] == '=') {val_buf = &t[i+1]; goto is_file;}
 			if (t[i] == ',') {val_buf = &t[i+1]; goto is_domain;}
+			if (xflags & 1) {
+				if (strchr("0123456789xbXB", t[i])) {
+					goto fail;
+				}
+			}
 			num_buf[i] = t[i];
 		}
 		goto fail;
 is_file:
 		curr_idx->idx = strtoul(num_buf, NULL, 0);
-		int file_fd = open(val_buf, O_RDONLY|O_NOCTTY);
+		int file_fd = openat(contextdir_fd, val_buf, O_RDONLY|O_NOCTTY|O_NONBLOCK);
 		if (file_fd < 0) goto fail;
 		off_t filesize = lseek(file_fd, 0, SEEK_END);
-		if (filesize < sizeof(struct idxf_hdr)) {close(file_fd); goto fail;}
+		if ((filesize < 0) || (filesize < sizeof(struct idxf_hdr))) {close(file_fd); goto fail;}
 		void *m = mmap(NULL, filesize, PROT_READ, MAP_SHARED, file_fd, 0);
 		if (m == MAP_FAILED) {
 			close(file_fd);
 			goto fail;
 		}
 		close(file_fd);
+		if (xflags & 1) {
+			struct idxf_hdr test_hdr;
+			memcpy(&test_hdr, m, sizeof(struct idxf_hdr));
+			if (test_hdr.magic != ntohl(0xf200a01eU)) {
+				goto fail;
+			}
+		}
 		curr_idx->base = m;
 		curr_idx->flags = 0;
 		curr_idx->len = filesize;

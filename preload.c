@@ -457,9 +457,14 @@ __attribute__((constructor)) static void _init(void) {
 	char *local_flags_s = getenv("URELAY_TPROXY_LOCAL_FLAGS");
 	if (local_flags_s) local_flags = strtoull(local_flags_s, NULL, 0);
 	gai_hack_init(!!(local_flags & LOCAL_FLAG_INIT_GAIHACK), &functable);
-	local_flags_s = getenv("URELAY_TPROXY_IDX_FILES");
+	local_flags_s = getenv("URELAY_TPROXY_IDX_FILES2");
 	if (local_flags_s) {
-		if (!init_idxf_array(local_flags_s, &functable)) abort();
+		if (!init_idxf_array(local_flags_s, 1, &functable)) abort();
+	} else {
+		local_flags_s = getenv("URELAY_TPROXY_IDX_FILES");
+		if (local_flags_s) {
+			if (!init_idxf_array(local_flags_s, 0, &functable)) abort();
+		}
 	}
 }
 __attribute__((visibility("default")))
