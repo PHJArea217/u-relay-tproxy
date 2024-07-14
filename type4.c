@@ -92,6 +92,7 @@ fill_domain:;
 int init_idxf_array(const char *config_s, int xflags, struct urtp_functions *functable) {
 	const char *contextdir = getenv("URELAY_TPROXY_CONTEXTDIR");
 	int contextdir_fd = AT_FDCWD;
+	char *cs = NULL;
 	if (contextdir) {
 		contextdir_fd = open(contextdir, O_RDONLY|O_CLOEXEC|O_DIRECTORY|O_PATH);
 		if (contextdir_fd < 0) {
@@ -99,11 +100,13 @@ int init_idxf_array(const char *config_s, int xflags, struct urtp_functions *fun
 			return 0;
 		}
 	}
-	char *cs = strdup(config_s);
-	if (!cs) return 0;
-	char *saveptr = NULL;
 	struct idx_file *list_head = NULL;
 	size_t list_size = 0;
+	cs = strdup(config_s);
+	if (!cs) {
+		goto fail;
+	}
+	char *saveptr = NULL;
 	for (char *t = strtok_r(cs, ";", &saveptr); t; t = strtok_r(NULL, ";", &saveptr)) {
 		size_t new_size = 0;
 		if (__builtin_mul_overflow(++list_size, sizeof(struct idx_file), &new_size)) goto fail;
@@ -160,11 +163,13 @@ is_domain:
 	}
 	idxf_head = list_head;
 	idxf_size = list_size;
+	if (contextdir_fd != AT_FDCWD) close(contextdir_fd);
 	return 1;
 fail:
 	perror("liburelay-tproxy failed");
 	free(cs);
 	/* TODO free each element in list_head */
 	free(list_head);
+	if (contextdir_fd != AT_FDCWD) close(contextdir_fd);
 	return 0;
 }
