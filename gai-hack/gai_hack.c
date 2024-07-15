@@ -5,6 +5,7 @@
 #include <string.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -14,6 +15,7 @@
 typedef int (*real_gai_t)(const char *, const char *, const struct addrinfo *, struct addrinfo **);
 #define GAIHACK_INITIALIZED 0x100000000ULL
 #define GAIHACK_UNIX_SOCK 0x10000ULL
+#define GAIHACK_SYMLINKS_ONLY 0x20000ULL
 static uint64_t gaihack_flags = 0;
 static char *sni_proxy_host = NULL;
 static char *sm_dirname = NULL;
@@ -28,7 +30,7 @@ static int init_logfile_fd(void) {
 	if (gaihack_flags & GAIHACK_UNIX_SOCK) {
 		int sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
 		struct sockaddr_un sa = {AF_UNIX, {0}};
-		strncpy(sa.sun_path, my_logfile, sizeof(sa.sun_path);
+		strncpy(sa.sun_path, my_logfile, sizeof(sa.sun_path));
 		if (connect(sockfd, (struct sockaddr *) &sa, sizeof(sa))) {
 			close(sockfd);
 			return -1;
@@ -92,9 +94,17 @@ is_root:
 	return 0;
 }
 static int check_name(int dir_fd, const char *name, char target_name[260]) {
+	if (gaihack_flags & GAIHACK_SYMLINKS_ONLY) {
+		goto check_symlink;
+	}
 	int file_fd = openat(dir_fd, name, O_CLOEXEC|O_RDONLY|O_NOCTTY, 0);
 	if (file_fd < 0) {
-		if (errno == ENOENT) goto check_symlink;
+		switch (errno) {
+			case ENOENT:
+			case ELOOP:
+			case ENAMETOOLONG:
+				goto check_symlink;
+		}
 		return 1;
 	}
 	ssize_t read_result = read(file_fd, target_name, 258);
@@ -117,6 +127,7 @@ check_symlink:
 		switch (errno) {
 			case ENOENT:
 			case EINVAL:
+			case ENAMETOOLONG:
 				return 2;
 		}
 		return 1;

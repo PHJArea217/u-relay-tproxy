@@ -123,7 +123,7 @@ int init_idxf_array(const char *config_s, int xflags, struct urtp_functions *fun
 			if (t[i] == '=') {val_buf = &t[i+1]; goto is_file;}
 			if (t[i] == ',') {val_buf = &t[i+1]; goto is_domain;}
 			if (xflags & 1) {
-				if (strchr("0123456789xbXB", t[i])) {
+				if (!strchr("0123456789xbXB", t[i])) {
 					goto fail;
 				}
 			}
