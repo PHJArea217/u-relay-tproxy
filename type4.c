@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <endian.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
@@ -123,7 +124,7 @@ int init_idxf_array(const char *config_s, int xflags, struct urtp_functions *fun
 			if (t[i] == '=') {val_buf = &t[i+1]; goto is_file;}
 			if (t[i] == ',') {val_buf = &t[i+1]; goto is_domain;}
 			if (xflags & 1) {
-				if (!strchr("0123456789xbXB", t[i])) {
+				if (!strchr("0123456789abcdefxABCDEFX", t[i])) {
 					goto fail;
 				}
 			}
@@ -161,8 +162,10 @@ is_domain:
 		curr_idx->len = strlen(new_str);
 		curr_idx->base = new_str;
 	}
+	qsort(list_head, list_size, sizeof(struct idx_file), compare_idxf);
 	idxf_head = list_head;
 	idxf_size = list_size;
+	free(cs);
 	if (contextdir_fd != AT_FDCWD) close(contextdir_fd);
 	return 1;
 fail:
