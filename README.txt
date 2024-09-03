@@ -59,3 +59,4 @@ IDX_FILE := number "," domain_name | number "=" filename
 TODO:
 document how to use it with nginx (`use poll` in events, substitute the first 16 bits to link-local prefix).
 allow disabling clearing the AI_ADDRCONFIG flag in gai-hack
+document URELAY_TPROXY_FILE, URELAY_TPROXY_IDX_FILES2 format

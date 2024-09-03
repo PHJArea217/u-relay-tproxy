@@ -133,7 +133,7 @@ int init_idxf_array(const char *config_s, int xflags, struct urtp_functions *fun
 		goto fail;
 is_file:
 		curr_idx->idx = strtoul(num_buf, NULL, 0);
-		int file_fd = openat(contextdir_fd, val_buf, O_RDONLY|O_NOCTTY|O_NONBLOCK);
+		int file_fd = openat(contextdir_fd, val_buf, O_RDONLY|O_NOCTTY|O_NONBLOCK|O_CLOEXEC);
 		if (file_fd < 0) goto fail;
 		off_t filesize = lseek(file_fd, 0, SEEK_END);
 		if ((filesize < 0) || (filesize < sizeof(struct idxf_hdr))) {close(file_fd); goto fail;}
