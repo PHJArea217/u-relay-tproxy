@@ -7,7 +7,7 @@ CFLAGS_E := -Wl,-z,relro,-z,now -ldl
 endif
 all: liburelay-tproxy.so
 
-liburelay-tproxy.so: preload.o subnet-masks.o type4.o type5.o gai-hack/gai_hack.o
+liburelay-tproxy.so: preload.o subnet-masks.o type1-unix.o type4.o type5.o gai-hack/gai_hack.o
 	$(CC) -pie -pthread -shared -o $@ $^ $(CFLAGS_E)
 %.o: %.c
 	$(CC) $(CFLAGS) $(CFLAGS_E) -fPIC -fvisibility=hidden -c -o $@ $<

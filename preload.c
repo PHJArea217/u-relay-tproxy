@@ -18,29 +18,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include "type4.h"
+#include "preload.h"
 extern uint8_t subnet_mask_data[129][16];
-struct data_entry {
-	uint8_t subnet_addr[16];
-	uint8_t subnet_mask;
-	uint8_t type;
-	uint16_t length;
-	uint32_t offset;
-	uint8_t reserved[8];
-};
-struct data_header {
-	uint32_t magic;
-	uint16_t nr_subnet_entries;
-	uint16_t total_length; /* 4096-byte units */
-	uint32_t flags;
-	uint32_t reserved;
-	struct data_entry entries[0];
-};
-struct type3_data {
-	uint8_t ipv6_addr[16];
-	uint8_t bindtodevice[16];
-	uint8_t bind_addr[16];
-	uint32_t flags;
-};
 static void int16tonum(uint16_t n, char *num) {
 	num[4] = '0' + (n % 10);
 	n /= 10;
@@ -52,16 +31,12 @@ static void int16tonum(uint16_t n, char *num) {
 	n /= 10;
 	num[0] = '0' + (n % 10);
 }
-static int (*real_connect)(int, const struct sockaddr *, socklen_t) = NULL;
-static int (*real_getsockname)(int, struct sockaddr *, socklen_t *) = NULL;
-static int (*real_getpeername)(int, struct sockaddr *, socklen_t *) = NULL;
-static int (*real_shutdown_func)(int, int) = NULL;
-static ssize_t (*real_sendmsg_func)(int, const struct msghdr *, int) = NULL;
-static struct data_header my_local_header;
-static struct data_header *actual_data_header = NULL;
-static size_t actual_data_header_len = 0;
-static uint64_t local_flags = 0;
-
+static struct urtp_globals globals_m = {
+	.int16tonum = int16tonum
+};
+struct urtp_globals *urtp_preload_globals = &globals_m;
+#define globals urtp_preload_globals
+#define t1_globals urtp_preload_t1_globals
 #ifdef URTP_FORCE_UNVERSIONED_SYMBOLS
 void *dlsym_func(void *handle, const char *symbol_name);
 char *dlerror_func(void);
@@ -83,14 +58,14 @@ __asm__(
 #define LOCAL_FLAG_INIT_GAIHACK 0x80000
 __attribute__((visibility("default")))
 int getsockname(int fd, struct sockaddr *sa, socklen_t *len) {
-	if (local_flags & LOCAL_FLAG_GETSOCKNAME_HACK) {
+	if (globals->local_flags & LOCAL_FLAG_GETSOCKNAME_HACK) {
 		int oldlen = *len;
 		if (oldlen < 0) {
 			errno = EINVAL;
 			return -1;
 		}
 		socklen_t newlen = oldlen;
-		if (real_getsockname(fd, sa, &newlen)) return -1;
+		if (globals->real_getsockname(fd, sa, &newlen)) return -1;
 		if ((oldlen >= 2) && (newlen == 2) && (sa->sa_family == AF_UNIX)) {
 			struct sockaddr_in6 dummy = {.sin6_family = AF_INET6};
 			if (oldlen >= sizeof(dummy)) oldlen = sizeof(dummy);
@@ -101,18 +76,18 @@ int getsockname(int fd, struct sockaddr *sa, socklen_t *len) {
 		}
 		return 0;
 	}
-	return real_getsockname(fd, sa, len);
+	return globals->real_getsockname(fd, sa, len);
 }
 __attribute__((visibility("default")))
 int getpeername(int fd, struct sockaddr *sa, socklen_t *len) {
-	if (local_flags & LOCAL_FLAG_GETSOCKNAME_HACK) {
+	if (globals->local_flags & LOCAL_FLAG_GETSOCKNAME_HACK) {
 		int oldlen = *len;
 		if (oldlen < 0) {
 			errno = EINVAL;
 			return -1;
 		}
 		socklen_t newlen = oldlen;
-		if (real_getpeername(fd, sa, &newlen)) return -1;
+		if (globals->real_getpeername(fd, sa, &newlen)) return -1;
 		if ((oldlen >= 2) && (newlen >= 2) && (sa->sa_family == AF_UNIX)) {
 			struct sockaddr_in6 dummy = {.sin6_family = AF_INET6};
 			if (oldlen >= sizeof(dummy)) oldlen = sizeof(dummy);
@@ -123,11 +98,11 @@ int getpeername(int fd, struct sockaddr *sa, socklen_t *len) {
 		}
 		return 0;
 	}
-	return real_getpeername(fd, sa, len);
+	return globals->real_getpeername(fd, sa, len);
 }
 __attribute__((visibility("default")))
 int shutdown(int s, int which) {
-	if (local_flags & LOCAL_FLAG_SHUTDOWN_HACK) {
+	if (globals->local_flags & LOCAL_FLAG_SHUTDOWN_HACK) {
 		if (which == SHUT_RD) {
 			int d = 0;
 			int dlen = sizeof(int);
@@ -138,7 +113,7 @@ int shutdown(int s, int which) {
 		}
 	}
 real_shutdown:
-	return real_shutdown_func(s, which);
+	return globals->real_shutdown_func(s, which);
 }
 static int apply_t3_data(int fd, struct type3_data *data, int sock_domain) {
 	uint32_t dev_len = strnlen(data->bindtodevice, 16);
@@ -242,27 +217,10 @@ c4_as_2:;
 			uint32_t length = entry.length;
 			if (length > (sizeof(resultant.sun_path) - 1)) length = sizeof(resultant.sun_path) - 1;
 			memcpy(resultant.sun_path, &data_start_offset[entry.offset], length);
-			char *subst_val = memmem(resultant.sun_path, length, "#//0_", 5);
-			if (subst_val) int16tonum(ntohs(sockaddr->sin6_addr.s6_addr16[0]), subst_val);
-			subst_val = memmem(resultant.sun_path, length, "#//1_", 5);
-			if (subst_val) int16tonum(ntohs(sockaddr->sin6_addr.s6_addr16[1]), subst_val);
-			subst_val = memmem(resultant.sun_path, length, "#//2_", 5);
-			if (subst_val) int16tonum(ntohs(sockaddr->sin6_addr.s6_addr16[2]), subst_val);
-			subst_val = memmem(resultant.sun_path, length, "#//3_", 5);
-			if (subst_val) int16tonum(ntohs(sockaddr->sin6_addr.s6_addr16[3]), subst_val);
-			subst_val = memmem(resultant.sun_path, length, "#//4_", 5);
-			if (subst_val) int16tonum(ntohs(sockaddr->sin6_addr.s6_addr16[4]), subst_val);
-			subst_val = memmem(resultant.sun_path, length, "#//5_", 5);
-			if (subst_val) int16tonum(ntohs(sockaddr->sin6_addr.s6_addr16[5]), subst_val);
-			subst_val = memmem(resultant.sun_path, length, "#//6_", 5);
-			if (subst_val) int16tonum(ntohs(sockaddr->sin6_addr.s6_addr16[6]), subst_val);
-			subst_val = memmem(resultant.sun_path, length, "#//7_", 5);
-			if (subst_val) int16tonum(ntohs(sockaddr->sin6_addr.s6_addr16[7]), subst_val);
-			subst_val = memmem(resultant.sun_path, length, "#//P_", 5);
-			if (subst_val) int16tonum(ntohs(sockaddr->sin6_port), subst_val);
+			t1_globals->sockaddr_un_subst(sockaddr, &resultant, length);
 			int s = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0);
 			if (s<0) return -1;
-			if (real_connect(s, (struct sockaddr *) &resultant, offsetof(struct sockaddr_un, sun_path) + length)) {
+			if (globals->real_connect(s, (struct sockaddr *) &resultant, offsetof(struct sockaddr_un, sun_path) + length)) {
 				close(s);
 				return -1;
 			}
@@ -326,13 +284,13 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
 		memcpy(&the_sockaddr, addr, sizeof(struct sockaddr_in6));
 	}
 	if (the_sockaddr.sin6_family == AF_INET6) {
-		if (actual_data_header_len) {
+		if (globals->actual_data_header_len) {
 			struct type3_data t3_data = {0};
 			int fflags_orig = fcntl(fd, F_GETFL, 0);
 			if (fflags_orig < 0) goto do_real_connect;
 			int fdflags_orig = fcntl(fd, F_GETFD, 0);
 			if (fdflags_orig < 0) goto do_real_connect;
-			int new_s = get_tproxy_socket(actual_data_header, &my_local_header, actual_data_header_len, &the_sockaddr, &t3_data);
+			int new_s = get_tproxy_socket(globals->actual_data_header, &globals->my_local_header, globals->actual_data_header_len, &the_sockaddr, &t3_data);
 			if (new_s == -2) {
 				goto do_real_connect;
 			}
@@ -352,13 +310,13 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
 							ipv4.sin_addr.s_addr = the_sockaddr.sin6_addr.s6_addr32[3];
 							if (apply_t3_data(fd, &t3_data, AF_INET)) goto fail_news;
 							errno = saved_errno;
-							return real_connect(fd, (struct sockaddr *) &ipv4, sizeof(ipv4));
+							return globals->real_connect(fd, (struct sockaddr *) &ipv4, sizeof(ipv4));
 						}
 						/* Otherwise we need to create an IPv6 socket and replace the original socket */
 						new_s = socket(AF_INET6, SOCK_CLOEXEC|SOCK_STREAM|((fflags_orig & O_NONBLOCK) ? SOCK_NONBLOCK : 0), IPPROTO_TCP);
 						if (new_s < 0) goto fail_news;
 						if (apply_t3_data(new_s, &t3_data, AF_INET6)) goto fail_news;
-						int rv = real_connect(new_s, (struct sockaddr *) &the_sockaddr, sizeof(the_sockaddr));
+						int rv = globals->real_connect(new_s, (struct sockaddr *) &the_sockaddr, sizeof(the_sockaddr));
 						if (rv == 0) {
 							break;
 						} else if ((rv == -1) && (errno == EINPROGRESS)) {
@@ -371,7 +329,7 @@ int connect(int fd, const struct sockaddr *addr, socklen_t len) {
 						/* We can connect with either IPv4 or IPv6. */
 						if (apply_t3_data(fd, &t3_data, AF_INET6)) goto fail_news;
 						errno = saved_errno;
-						return real_connect(fd, (struct sockaddr *) &the_sockaddr, sizeof(the_sockaddr));
+						return globals->real_connect(fd, (struct sockaddr *) &the_sockaddr, sizeof(the_sockaddr));
 						break;
 					default:
 						goto do_real_connect;
@@ -399,11 +357,11 @@ fail_news:
 	}
 do_real_connect:
 	errno = saved_errno;
-	int retval = real_connect(fd, addr, len);
+	int retval = globals->real_connect(fd, addr, len);
 	return retval;
 }
 __attribute__((constructor)) static void _init(void) {
-	struct urtp_functions functable = {._dlsym = dlsym_func, ._dlerror = dlerror_func, ._fstat = abort};
+	struct urtp_functions functable = {._dlsym = dlsym_func, ._dlerror = dlerror_func};
 	char *datafile_name = getenv("URELAY_TPROXY_FILE");
 	if (datafile_name) {
 		int datafile_fd = open(datafile_name, O_RDONLY|O_NOCTTY|O_CLOEXEC);
@@ -413,7 +371,7 @@ __attribute__((constructor)) static void _init(void) {
 			return;
 		}
 		off_t file_size = lseek(datafile_fd, 0, SEEK_END);
-		if (file_size < sizeof(my_local_header)) {
+		if (file_size < sizeof(globals->my_local_header)) {
 			fprintf(stderr, "tproxy-preload: File empty or less than minimum size\n");
 			abort();
 			return;
@@ -425,38 +383,38 @@ __attribute__((constructor)) static void _init(void) {
 			return;
 		}
 		close(datafile_fd);
-		actual_data_header = datafile_mmap;
-		actual_data_header_len = file_size;
-		if (actual_data_header_len < sizeof(my_local_header)) abort();
-		memcpy(&my_local_header, actual_data_header, sizeof(my_local_header));
-		if (my_local_header.magic != htonl(0xf200a01fU)) {
+		globals->actual_data_header = datafile_mmap;
+		globals->actual_data_header_len = file_size;
+		if (globals->actual_data_header_len < sizeof(globals->my_local_header)) abort();
+		memcpy(&globals->my_local_header, globals->actual_data_header, sizeof(globals->my_local_header));
+		if (globals->my_local_header.magic != htonl(0xf200a01fU)) {
 			fprintf(stderr, "tproxy-preload: bad magic number in %s\n", datafile_name);
 			abort();
 			return;
 		}
-		my_local_header.nr_subnet_entries = ntohs(my_local_header.nr_subnet_entries);
-		if (actual_data_header_len < (offsetof(struct data_header, entries) + (my_local_header.nr_subnet_entries * sizeof(struct data_entry)))) abort();
+		globals->my_local_header.nr_subnet_entries = ntohs(globals->my_local_header.nr_subnet_entries);
+		if (globals->actual_data_header_len < (offsetof(struct data_header, entries) + (globals->my_local_header.nr_subnet_entries * sizeof(struct data_entry)))) abort();
 	}
 	void *connect_symbol = dlsym_func(RTLD_NEXT, "connect");
 	if (connect_symbol == NULL) abort();
-	real_connect = connect_symbol;
+	globals->real_connect = connect_symbol;
 	void *sendmsg_symbol = dlsym_func(RTLD_NEXT, "sendmsg");
 	if (sendmsg_symbol == NULL) abort();
-	real_sendmsg_func = sendmsg_symbol;
+	globals->real_sendmsg_func = sendmsg_symbol;
 	void *getsockname_symbol = dlsym_func(RTLD_NEXT, "getsockname");
 	if (getsockname_symbol == NULL) abort();
-	real_getsockname = getsockname_symbol;
+	globals->real_getsockname = getsockname_symbol;
 	void *getpeername_symbol = dlsym_func(RTLD_NEXT, "getpeername");
 	if (getpeername_symbol == NULL) abort();
-	real_getpeername = getpeername_symbol;
+	globals->real_getpeername = getpeername_symbol;
 	void *shutdown_symbol = dlsym_func(RTLD_NEXT, "shutdown");
 	if (!shutdown_symbol) {
 		abort();
 	}
-	real_shutdown_func = shutdown_symbol;
+	globals->real_shutdown_func = shutdown_symbol;
 	char *local_flags_s = getenv("URELAY_TPROXY_LOCAL_FLAGS");
-	if (local_flags_s) local_flags = strtoull(local_flags_s, NULL, 0);
-	gai_hack_init(!!(local_flags & LOCAL_FLAG_INIT_GAIHACK), &functable);
+	if (local_flags_s) globals->local_flags = strtoull(local_flags_s, NULL, 0);
+	gai_hack_init(!!(globals->local_flags & LOCAL_FLAG_INIT_GAIHACK), &functable);
 	local_flags_s = getenv("URELAY_TPROXY_IDX_FILES2");
 	if (local_flags_s) {
 		if (!init_idxf_array(local_flags_s, 1, &functable)) abort();
@@ -469,13 +427,13 @@ __attribute__((constructor)) static void _init(void) {
 }
 __attribute__((visibility("default")))
 ssize_t sendmsg(int fd, const struct msghdr *mh, int flags) {
-	if (local_flags & LOCAL_FLAG_FASTOPEN_HACK) {
+	if (globals->local_flags & LOCAL_FLAG_FASTOPEN_HACK) {
 		if (flags & MSG_FASTOPEN) {
 			errno = EPIPE;
 			return -1;
 		}
 	}
-	return real_sendmsg_func(fd, mh, flags);
+	return globals->real_sendmsg_func(fd, mh, flags);
 }
 __attribute__((visibility("default")))
 ssize_t sendto(int fd, const void *data, size_t len, int flags, const struct sockaddr *a, socklen_t al) {
